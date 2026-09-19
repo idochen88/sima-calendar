@@ -7,10 +7,15 @@
 
   const PAYMENTS = [
     { id: 'paybox', label: 'PayBox' },
-    { id: 'cash', label: 'מזומן' },
+    { id: 'bit', label: 'ביט' },
     { id: 'bank', label: 'העברה בנקאית' },
     { id: 'meshulam', label: 'משולם' },
   ];
+  // אמצעי תשלום שהוסרו מהרשימה, אבל עדיין מופיעים בטיפולים ישנים
+  const LEGACY_PAYMENTS = [
+    { id: 'cash', label: 'מזומן' },
+  ];
+  const ALL_PAYMENTS = PAYMENTS.concat(LEGACY_PAYMENTS);
   const NO_PAYMENT = 'none';
   const NO_PAYMENT_LABEL = 'לא צוין';
 
@@ -169,8 +174,23 @@
     return `${neg ? '-' : ''}₪${body}`;
   }
 
+  const isProduct = (i) => i.kind === 'product';
+
+  function itemQty(i) {
+    const q = Number(i.qty);
+    return q > 0 ? q : 1;
+  }
+
+  function itemTotal(i) {
+    return round2(num(i.price) * itemQty(i));
+  }
+
+  function itemLabel(i) {
+    return i.sub ? `${i.name} – ${i.sub}` : (i.name || '');
+  }
+
   function apptTotal(a) {
-    return round2((a.items || []).reduce((s, i) => s + num(i.price), 0));
+    return round2((a.items || []).reduce((s, i) => s + itemTotal(i), 0));
   }
 
   function isCounted(a) {
@@ -178,7 +198,7 @@
   }
 
   function paymentLabel(id) {
-    const p = PAYMENTS.find((x) => x.id === id);
+    const p = ALL_PAYMENTS.find((x) => x.id === id);
     return p ? p.label : NO_PAYMENT_LABEL;
   }
 
@@ -187,10 +207,19 @@
     return s ? s.label : 'ממתינה';
   }
 
-  function treatmentNames(a) {
-    const names = (a.items || []).map((i) => i.name).filter(Boolean);
+  function joinHe(names) {
     if (names.length <= 1) return names[0] || '';
     return names.slice(0, -1).join(', ') + ' ו' + names[names.length - 1];
+  }
+
+  // שמות הטיפולים בלבד (בלי תכשירים), למשל "טיפול פנים – פילינג ועיצוב גבות"
+  function treatmentNames(a) {
+    return joinHe((a.items || []).filter((i) => !isProduct(i)).map(itemLabel).filter(Boolean));
+  }
+
+  function productNames(a) {
+    return (a.items || []).filter(isProduct)
+      .map((i) => (itemQty(i) > 1 ? `${i.name} ×${itemQty(i)}` : i.name)).join(', ');
   }
 
   /* ---------- סיכומים ---------- */
@@ -200,39 +229,62 @@
     const counted = inRange.filter(isCounted);
 
     const byPayment = {};
-    PAYMENTS.forEach((p) => { byPayment[p.id] = 0; });
+    ALL_PAYMENTS.forEach((p) => { byPayment[p.id] = 0; });
     byPayment[NO_PAYMENT] = 0;
 
     const typeMap = new Map();
+    const productMap = new Map();
     let total = 0;
+    let productsTotal = 0;
     let itemsCount = 0;
+    const byTotal = (a, b) => b.total - a.total || b.count - a.count;
 
     for (const a of counted) {
       const t = apptTotal(a);
       total += t;
-      const key = PAYMENTS.some((p) => p.id === a.payment) ? a.payment : NO_PAYMENT;
+      const key = ALL_PAYMENTS.some((p) => p.id === a.payment) ? a.payment : NO_PAYMENT;
       byPayment[key] = round2(byPayment[key] + t);
       for (const it of a.items || []) {
         const name = (it.name || 'ללא שם').trim();
-        const row = typeMap.get(name) || { name, count: 0, total: 0 };
+        const sum = itemTotal(it);
+        if (isProduct(it)) {
+          const row = productMap.get(name) || { name, count: 0, total: 0 };
+          row.count += itemQty(it);
+          row.total = round2(row.total + sum);
+          productMap.set(name, row);
+          productsTotal += sum;
+          continue;
+        }
+        const row = typeMap.get(name) || { name, typeId: it.typeId || null, color: it.color || '', count: 0, total: 0, subMap: new Map() };
         row.count += 1;
-        row.total = round2(row.total + num(it.price));
+        row.total = round2(row.total + sum);
+        const subKey = it.sub || '';
+        const sr = row.subMap.get(subKey) || { name: it.sub || 'כללי', count: 0, total: 0 };
+        sr.count += 1;
+        sr.total = round2(sr.total + sum);
+        row.subMap.set(subKey, sr);
         typeMap.set(name, row);
         itemsCount += 1;
       }
     }
 
-    const byType = [...typeMap.values()].sort((a, b) => b.total - a.total || b.count - a.count);
+    // פירוט לתתי-סוגים רק כשיש כאלה ("כללי" = בלי תת-סוג)
+    const byType = [...typeMap.values()].map(({ subMap, ...r }) => ({
+      ...r, subs: subMap.size === 1 && subMap.has('') ? [] : [...subMap.values()].sort(byTotal),
+    })).sort(byTotal);
+    const byProduct = [...productMap.values()].sort(byTotal);
 
     return {
       from,
       to,
       total: round2(total),
+      productsTotal: round2(productsTotal),
       count: counted.length,
       itemsCount,
       cancelledCount: inRange.length - counted.length,
       byPayment,
       byType,
+      byProduct,
     };
   }
 
@@ -371,6 +423,66 @@
       (digits.length >= 3 && String(c.phone).replace(/\D/g, '').includes(digits)));
   }
 
+  /* ---------- יומן האייפון (קובץ ics עם התראה) ---------- */
+
+  function icsEscape(s) {
+    return String(s || '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+  }
+
+  // שורות ארוכות מקופלות ל-75 בתים לפי התקן, בלי לחתוך תו עברי באמצע
+  function icsFold(line) {
+    const enc = new TextEncoder();
+    const out = [];
+    let cur = '';
+    let bytes = 0;
+    for (const ch of line) {
+      const b = enc.encode(ch).length;
+      if (bytes + b > (out.length ? 74 : 75)) {
+        out.push(cur);
+        cur = '';
+        bytes = 0;
+      }
+      cur += ch;
+      bytes += b;
+    }
+    out.push(cur);
+    return out.join('\r\n ');
+  }
+
+  const icsDateTime = (date, time) => `${date.replace(/-/g, '')}T${time.replace(':', '')}00`;
+
+  function icsStamp(now) {
+    const d = now || new Date();
+    return `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}Z`;
+  }
+
+  // אירוע לכל טיפול, בשעה מקומית (בלי אזור זמן), עם התראה X דקות לפני
+  function buildICS(appts, opts = {}) {
+    const alarm = Number(opts.alarmMinutes);
+    const stamp = icsStamp(opts.now);
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Sima Calendar//HE', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+    for (const a of appts) {
+      const what = treatmentNames(a) || productNames(a) || 'טיפול';
+      const desc = [a.phone ? `טלפון: ${a.phone}` : '', productNames(a) ? `תכשירים: ${productNames(a)}` : '', a.notes || ''].filter(Boolean).join('\n');
+      lines.push(
+        'BEGIN:VEVENT',
+        `UID:${a.id}@sima-calendar`,
+        `DTSTAMP:${stamp}`,
+        `DTSTART:${icsDateTime(a.date, a.time)}`,
+        `DTEND:${icsDateTime(a.date, apptEnd(a))}`,
+        `SUMMARY:${icsEscape(`${a.clientName} – ${what}`)}`,
+      );
+      if (desc) lines.push(`DESCRIPTION:${icsEscape(desc)}`);
+      if (opts.businessName) lines.push(`LOCATION:${icsEscape(opts.businessName)}`);
+      if (alarm > 0) {
+        lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${icsEscape(`${a.clientName} בעוד ${alarm} דקות`)}`, `TRIGGER:-PT${alarm}M`, 'END:VALARM');
+      }
+      lines.push('END:VEVENT');
+    }
+    lines.push('END:VCALENDAR');
+    return lines.map(icsFold).join('\r\n') + '\r\n';
+  }
+
   /* ---------- אנשי קשר (קובץ vCard מהאייפון) ---------- */
 
   function decodeQP(s) {
@@ -456,12 +568,13 @@
   }
 
   const api = {
-    PAYMENTS, NO_PAYMENT, NO_PAYMENT_LABEL, STATUSES, DAY_NAMES, DAY_LETTERS, MONTH_NAMES,
+    PAYMENTS, LEGACY_PAYMENTS, ALL_PAYMENTS, NO_PAYMENT, NO_PAYMENT_LABEL, STATUSES, DAY_NAMES, DAY_LETTERS, MONTH_NAMES,
     DEFAULT_DURATION, DEFAULT_TEMPLATE,
     parseDate, fmtDate, todayStr, addDays, dayOfWeek, daysInMonth, monthStart, monthEnd, addMonths,
     weekStart, weekRange, monthRange, monthWeeks, shortDate, longDate, monthLabel, dayName,
     timeToMin, minToTime, apptDuration, apptEnd,
     num, round2, formatMoney, apptTotal, isCounted, paymentLabel, statusLabel, treatmentNames,
+    isProduct, itemQty, itemTotal, itemLabel, productNames, buildICS,
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,
     normName, clientsIndex, searchClients, parseVCards,

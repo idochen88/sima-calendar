@@ -35,20 +35,80 @@
       clock: s('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
       note: s('<path d="M4 4h16v12l-4 4H4z"/><path d="M16 20v-4h4"/>'),
       alert: s('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'),
+      edit: s('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/>'),
+      move: s('<rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M9 15h6M13 13l2 2-2 2"/>'),
+      bag: s('<path d="M5 8h14l-1 13H6L5 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>'),
     };
   })();
 
   /* ---------- מצב ---------- */
+  // הצבעים שאפשר לבחור לסוגי הטיפולים
+  const PALETTE = [
+    { c: '#E5879F', n: 'ורוד' }, { c: '#F08C7E', n: 'אלמוג' }, { c: '#F2A65A', n: 'כתום' },
+    { c: '#DDB443', n: 'חרדל' }, { c: '#86BC7C', n: 'ירוק' }, { c: '#48B39B', n: 'מנטה' },
+    { c: '#4BAAD0', n: 'טורקיז' }, { c: '#6C94E0', n: 'כחול' }, { c: '#9C8CDB', n: 'לבנדר' },
+    { c: '#C27BC4', n: 'סגול' }, { c: '#B38B6D', n: 'מוקה' }, { c: '#8E9AAF', n: 'אפור' },
+  ];
+  const DEFAULT_COLORS = { 't-face': '#E5879F', 't-hair': '#9C8CDB', 't-brows': '#B38B6D' };
+  const NEUTRAL = '#C9B7AE';
+  const ALARM_OPTIONS = [5, 10, 15, 30, 60];
+
   const DEFAULT_TYPES = [
-    { id: 't-face', name: 'טיפול פנים', price: 250, duration: 60 },
-    { id: 't-hair', name: 'הסרת שיער', price: 150, duration: 30 },
-    { id: 't-brows', name: 'עיצוב גבות', price: 80, duration: 20 },
+    { id: 't-face', name: 'טיפול פנים', price: 250, duration: 60, color: '#E5879F', subs: [] },
+    { id: 't-hair', name: 'הסרת שיער', price: 150, duration: 30, color: '#9C8CDB', subs: [] },
+    { id: 't-brows', name: 'עיצוב גבות', price: 80, duration: 20, color: '#B38B6D', subs: [] },
   ];
   const DEFAULT_SETTINGS = {
     businessName: 'סימה חן קוסמטיקאית מוסמכת',
     template: L.DEFAULT_TEMPLATE,
     treatmentTypes: DEFAULT_TYPES,
+    products: [],
+    alarmMinutes: 15,
+    askCalendar: true,
   };
+
+  // משלים שדות חדשים (צבע, תתי-סוגים, תכשירים) להגדרות שנשמרו בגרסה קודמת
+  function normalizeSettings(src) {
+    const s = { ...src };
+    s.treatmentTypes = (Array.isArray(s.treatmentTypes) ? s.treatmentTypes : []).map((t, i) => ({
+      id: String(t.id || 't-' + uid()),
+      name: String(t.name || ''),
+      price: L.num(t.price),
+      duration: Number(t.duration) || 30,
+      color: t.color || DEFAULT_COLORS[t.id] || PALETTE[i % PALETTE.length].c,
+      subs: (Array.isArray(t.subs) ? t.subs : []).map((x) => ({
+        id: String(x.id || 's-' + uid()), name: String(x.name || ''), price: L.num(x.price), duration: Number(x.duration) || 0,
+      })),
+    }));
+    s.products = (Array.isArray(s.products) ? s.products : []).map((p) => ({
+      id: String(p.id || 'p-' + uid()), name: String(p.name || ''), price: L.num(p.price),
+    }));
+    s.alarmMinutes = ALARM_OPTIONS.includes(Number(s.alarmMinutes)) ? Number(s.alarmMinutes) : 15;
+    s.askCalendar = s.askCalendar !== false;
+    if (typeof s.businessName !== 'string') s.businessName = DEFAULT_SETTINGS.businessName;
+    if (typeof s.template !== 'string' || !s.template.trim()) s.template = L.DEFAULT_TEMPLATE;
+    return s;
+  }
+
+  const typeById = (id) => state.settings.treatmentTypes.find((t) => t.id === id);
+
+  function itemColor(it) {
+    if (L.isProduct(it)) return NEUTRAL;
+    const t = it.typeId && typeById(it.typeId);
+    return (t && t.color) || it.color || NEUTRAL;
+  }
+
+  // צבע הטיפול = הצבע של הטיפול הראשון בכרטיס
+  function apptColor(a) {
+    const it = (a.items || []).find((i) => !L.isProduct(i));
+    return it ? itemColor(it) : NEUTRAL;
+  }
+
+  function nextFreeColor() {
+    const used = new Set(state.settings.treatmentTypes.map((t) => t.color));
+    const free = PALETTE.find((p) => !used.has(p.c));
+    return (free || PALETTE[state.settings.treatmentTypes.length % PALETTE.length]).c;
+  }
 
   const today = () => L.todayStr();
   const tomorrow = () => L.addDays(today(), 1);
@@ -66,6 +126,7 @@
     sumTab: 'day',
     sumDate: L.todayStr(),
     clientQuery: '',
+    clientFilter: 'all',
     contacts: [],
   };
 
@@ -144,14 +205,14 @@
   }
   const sheetOpen = () => $('#sheetWrap').classList.contains('open');
 
-  function periodNav(label, sub, prev, next, todayAction) {
+  function periodNav(label, sub, prev, next, todayAction, todayLabel = 'חזרה להיום') {
     return `
       <div class="period-nav">
         <button class="icon-btn" data-action="${prev}" aria-label="הקודם">${I.right}</button>
         <div class="period-label">
           <b>${esc(label)}</b>
           ${sub ? `<small>${esc(sub)}</small>` : ''}
-          ${todayAction ? `<div><button class="today-link" data-action="${todayAction}">חזרה להיום</button></div>` : ''}
+          ${todayAction ? `<div><button class="today-link" data-action="${todayAction}">${todayLabel}</button></div>` : ''}
         </div>
         <button class="icon-btn" data-action="${next}" aria-label="הבא">${I.left}</button>
       </div>`;
@@ -197,6 +258,9 @@
     const first = L.dayOfWeek(m);
     const days = L.daysInMonth(y, mo);
     const totals = L.dailyTotals(state.appts, m, L.monthEnd(m));
+    const colorsByDay = {};
+    sortByTime(state.appts.filter((a) => a.date.startsWith(m.slice(0, 8)) && L.isCounted(a)))
+      .forEach((a) => { (colorsByDay[a.date] = colorsByDay[a.date] || []).push(apptColor(a)); });
     const monthSum = L.summarize(state.appts, m, L.monthEnd(m));
     const todaySum = L.daySummary(state.appts, t);
     const hour = new Date().getHours();
@@ -210,15 +274,15 @@
       const cls = ['cal-day'];
       if (ds === t) cls.push('today');
       if (ds < t) cls.push('past');
-      if (info) cls.push('has');
+      const colors = colorsByDay[ds] || [];
+      if (colors.length) cls.push('has');
       if ((first + d - 1) % 7 === 6) cls.push('sat');
       let dots = '';
-      if (info) {
-        const st = info.statuses;
-        dots = st.slice(0, 4).map((s) => `<i class="dot ${s}"></i>`).join('') +
-          (st.length > 4 ? `<span class="more">+${st.length - 4}</span>` : '');
+      if (colors.length) {
+        dots = colors.slice(0, 4).map((c) => `<i class="dot" style="background:${c}"></i>`).join('') +
+          (colors.length > 4 ? `<span class="more">+${colors.length - 4}</span>` : '');
       }
-      const label = `${d} ב${L.MONTH_NAMES[mo - 1]}${info ? `, ${info.statuses.length} טיפולים, ${money(info.total)}` : ''}`;
+      const label = `${d} ב${L.MONTH_NAMES[mo - 1]}${info ? `, ${info.count} טיפולים, ${money(info.total)}` : ''}`;
       cells += `<button class="${cls.join(' ')}" data-action="open-day" data-date="${ds}" aria-label="${esc(label)}">
         <span class="n">${d}</span>
         <span class="dots">${dots}</span>
@@ -248,9 +312,7 @@
         </div>
         <div class="cal-grid">${cells}</div>
         <div class="legend">
-          <span><i class="dot confirmed"></i>אישרה</span>
-          <span><i class="dot pending"></i>ממתינה</span>
-          <span><i class="dot cancelled"></i>ביטלה</span>
+          ${state.settings.treatmentTypes.map((tp) => `<span><i class="dot" style="background:${tp.color}"></i>${esc(tp.name)}</span>`).join('')}
         </div>
         <button class="cal-foot row-btn" data-action="sum-month" data-date="${m}">
           <span>סה״כ ${L.MONTH_NAMES[mo - 1]} · ${monthSum.count} טיפולים</span>
@@ -261,18 +323,34 @@
   }
 
   /* ---------- מסך יום ---------- */
+  // הטיפולים בכרטיס, כל אחד עם נקודה בצבע שלו, ואחריהם התכשירים
+  function itemChips(a) {
+    const tx = (a.items || []).filter((i) => !L.isProduct(i)).map((i) =>
+      `<span class="tx-chip"><i class="dot" style="background:${itemColor(i)}"></i>${esc(L.itemLabel(i))}</span>`).join('');
+    const pr = L.productNames(a);
+    return `<div class="tx-chips">${tx}${pr ? `<span class="tx-chip product">${I.bag}${esc(pr)}</span>` : ''}</div>`;
+  }
+
+  function apptActions(a) {
+    return `<div class="appt-actions">
+      <button data-action="edit-appt" data-id="${a.id}">${I.edit}עריכה</button>
+      <button data-action="move-appt" data-id="${a.id}" aria-label="העברה ליום אחר">${I.move}העברה</button>
+      ${a.status !== 'cancelled' ? `<button data-action="cal-add" data-id="${a.id}" class="${a.calendarAddedAt ? 'done' : ''}">${I.bell}${a.calendarAddedAt ? 'ביומן ✓' : 'התראה'}</button>` : ''}
+    </div>`;
+  }
+
   function apptCard(a, overlapIds) {
     const pay = a.payment ? L.paymentLabel(a.payment) : '';
     const sent = a.reminderSent
       ? `<span class="tag sent">${I.check}תזכורת נשלחה</span>`
       : (a.status !== 'cancelled' && a.date > today() ? '<span class="tag notsent">טרם נשלחה תזכורת</span>' : '');
     return `
-      <article class="appt ${a.status}">
+      <article class="appt ${a.status}" style="--tc:${apptColor(a)}">
         <button class="appt-body" data-action="edit-appt" data-id="${a.id}">
           <div class="appt-time"><b>${esc(a.time)}</b><small>עד ${L.apptEnd(a)}</small></div>
           <div class="appt-main">
-            <div class="appt-name">${esc(a.clientName)}</div>
-            <div class="appt-tx">${esc(L.treatmentNames(a))}</div>
+            <div class="appt-name">${esc(a.clientName)} <span class="pill ${a.status}">${L.statusLabel(a.status)}</span></div>
+            ${itemChips(a)}
             <div class="appt-meta">
               ${pay ? `<span class="tag">${esc(pay)}</span>` : '<span class="tag">אמצעי תשלום לא צוין</span>'}
               ${sent}
@@ -283,6 +361,7 @@
           <div class="appt-price">${money(L.apptTotal(a))}</div>
         </button>
         ${statusSeg(a)}
+        ${apptActions(a)}
       </article>`;
   }
 
@@ -305,9 +384,16 @@
     return set;
   }
 
+  // ארבעת אמצעי התשלום תמיד; מזומן ישן ו"לא צוין" רק כשיש בהם סכום
+  function paymentRows(s) {
+    const rows = L.PAYMENTS.map((p) => ({ id: p.id, label: p.label, v: s.byPayment[p.id] }));
+    L.LEGACY_PAYMENTS.forEach((p) => { if (s.byPayment[p.id]) rows.push({ id: p.id, label: p.label, v: s.byPayment[p.id] }); });
+    if (s.byPayment[L.NO_PAYMENT]) rows.push({ id: 'none', label: L.NO_PAYMENT_LABEL, v: s.byPayment[L.NO_PAYMENT] });
+    return rows;
+  }
+
   function payTiles(s) {
-    const rows = L.PAYMENTS.map((p) => ({ label: p.label, v: s.byPayment[p.id] }));
-    if (s.byPayment[L.NO_PAYMENT]) rows.push({ label: L.NO_PAYMENT_LABEL, v: s.byPayment[L.NO_PAYMENT] });
+    const rows = paymentRows(s);
     return `<div class="pay-tiles">${rows.map((r) =>
       `<div class="pay-tile ${r.v ? '' : 'zero'}"><span>${esc(r.label)}</span><b>${money(r.v)}</b></div>`).join('')}</div>`;
   }
@@ -352,7 +438,7 @@
       btn = `<a class="btn wa" href="${esc(link)}" target="_blank" rel="noopener" data-action="wa-sent" data-id="${a.id}">${I.wa}שלחי תזכורת בוואטסאפ</a>`;
     }
     return `
-      <article class="appt rem-card ${a.status}">
+      <article class="appt rem-card ${a.status}" style="--tc:${apptColor(a)}">
         <button class="rem-top row-btn" data-action="edit-appt" data-id="${a.id}">
           <div class="appt-time"><b>${esc(a.time)}</b><small>עד ${L.apptEnd(a)}</small></div>
           <div class="appt-main">
@@ -369,6 +455,7 @@
         </div>
         <div class="field-label" style="padding:0 14px;margin-bottom:6px">הלקוחה ענתה? עדכני:</div>
         ${statusSeg(a)}
+        ${apptActions(a)}
       </article>`;
   }
 
@@ -379,7 +466,7 @@
     const label = d === tomorrow() ? `מחר · יום ${L.dayName(d)}` : `${dayLabel(d)}${dayLabel(d).startsWith('יום') ? '' : ` · יום ${L.dayName(d)}`}`;
     return `
       <div class="vhead"><div class="vhead-title"><h1>תזכורות</h1><p class="sub">שליחת תזכורות ואישורי הגעה</p></div></div>
-      ${periodNav(label, L.longDate(d), 'rem-prev', 'rem-next', d === tomorrow() ? '' : 'rem-tomorrow')}
+      ${periodNav(label, L.longDate(d), 'rem-prev', 'rem-next', d === tomorrow() ? '' : 'rem-tomorrow', 'חזרה למחר')}
       ${r.total ? `
         <div class="chips-line">
           <span class="chip-stat">${r.total} טיפולים</span>
@@ -397,8 +484,7 @@
 
   /* ---------- מסך סיכומים ---------- */
   function breakdownPayments(s) {
-    const rows = L.PAYMENTS.map((p) => ({ id: p.id, label: p.label, v: s.byPayment[p.id] }));
-    if (s.byPayment[L.NO_PAYMENT]) rows.push({ id: 'none', label: L.NO_PAYMENT_LABEL, v: s.byPayment[L.NO_PAYMENT] });
+    const rows = paymentRows(s);
     return `<section class="card"><h2>לפי אמצעי תשלום</h2><div class="rows">
       ${rows.map((r) => {
         const pct = s.total ? Math.round((r.v / s.total) * 100) : 0;
@@ -413,11 +499,21 @@
   function breakdownTypes(s) {
     if (!s.byType.length) return '';
     const max = Math.max(...s.byType.map((t) => t.total), 1);
+    const colorOf = (t) => ((t.typeId && typeById(t.typeId)) || state.settings.treatmentTypes.find((x) => x.name === t.name) || t).color || NEUTRAL;
     return `<section class="card"><h2>לפי סוג טיפול</h2><div class="rows">
       ${s.byType.map((t) => `<div>
-        <div class="row-line"><span class="lbl">${esc(t.name)} <small>× ${t.count}</small></span><span class="val">${money(t.total)}</span></div>
-        <div class="bar"><i style="width:${Math.round((t.total / max) * 100)}%"></i></div>
+        <div class="row-line"><span class="lbl"><i class="swatch" style="background:${colorOf(t)}"></i>${esc(t.name)} <small>× ${t.count}</small></span><span class="val">${money(t.total)}</span></div>
+        <div class="bar"><i style="width:${Math.round((t.total / max) * 100)}%;background:${colorOf(t)}"></i></div>
+        ${t.subs.length ? `<div class="sub-lines">${t.subs.map((x) =>
+          `<div class="row-line"><span class="lbl">${esc(x.name)} <small>× ${x.count}</small></span><span class="val">${money(x.total)}</span></div>`).join('')}</div>` : ''}
       </div>`).join('')}
+    </div></section>`;
+  }
+
+  function breakdownProducts(s) {
+    if (!s.byProduct.length) return '';
+    return `<section class="card"><h2>מכירת תכשירים <small>${money(s.productsTotal)}</small></h2><div class="rows">
+      ${s.byProduct.map((p) => `<div class="row-line"><span class="lbl">${esc(p.name)} <small>× ${p.count}</small></span><span class="val">${money(p.total)}</span></div>`).join('')}
     </div></section>`;
   }
 
@@ -429,6 +525,7 @@
       <div class="hero-meta">
         <span>${s.count} טיפולים</span>
         ${s.count ? `<span>ממוצע ${money(Math.round(avg))} לטיפול</span>` : ''}
+        ${s.productsTotal ? `<span>מתוכם תכשירים ${money(s.productsTotal)}</span>` : ''}
         ${s.cancelledCount ? `<span>${s.cancelledCount} ביטלו (לא נספרו)</span>` : ''}
       </div>
     </section>`;
@@ -442,7 +539,7 @@
     if (tab === 'day') {
       const s = L.daySummary(state.appts, d);
       nav = periodNav(d === t ? `היום · יום ${L.dayName(d)}` : `יום ${L.dayName(d)}`, L.longDate(d), 'sum-prev', 'sum-next', d === t ? '' : 'sum-today');
-      body = summaryHero(s, 'סך הכנסות ביום') + breakdownPayments(s) + breakdownTypes(s) +
+      body = summaryHero(s, 'סך הכנסות ביום') + breakdownPayments(s) + breakdownTypes(s) + breakdownProducts(s) +
         `<button class="btn secondary" data-action="open-day" data-date="${d}" data-back="summary">לרשימת הטיפולים ביום</button>`;
     } else if (tab === 'week') {
       const s = L.weekSummary(state.appts, d);
@@ -450,7 +547,7 @@
       nav = periodNav(cur ? 'השבוע' : `שבוע ${L.shortDate(s.from)} – ${L.shortDate(s.to)}`,
         `ראשון ${L.shortDate(s.from)} עד שבת ${L.shortDate(s.to)}`, 'sum-prev', 'sum-next', cur ? '' : 'sum-today');
       const maxDay = Math.max(...s.days.map((x) => x.total), 1);
-      body = summaryHero(s, 'סך הכנסות בשבוע') + breakdownPayments(s) + breakdownTypes(s) +
+      body = summaryHero(s, 'סך הכנסות בשבוע') + breakdownPayments(s) + breakdownTypes(s) + breakdownProducts(s) +
         `<section class="card"><h2>לפי ימים</h2><div class="rows">
           ${s.days.map((x) => `<button class="row-btn" data-action="open-day" data-date="${x.from}" data-back="summary">
             <div class="row-line ${x.total ? '' : 'zero'}"><span class="lbl">יום ${L.dayName(x.from)} <small>${L.shortDate(x.from)}${x.count ? ` · ${x.count} טיפולים` : ''}</small></span><span class="val">${money(x.total)}</span></div>
@@ -461,7 +558,7 @@
       const cur = L.monthStart(t) === s.from;
       nav = periodNav(L.monthLabel(d), cur ? 'החודש הנוכחי' : '', 'sum-prev', 'sum-next', cur ? '' : 'sum-today');
       const maxW = Math.max(...s.weeks.map((x) => x.total), 1);
-      body = summaryHero(s, 'סך הכנסות בחודש') + breakdownPayments(s) + breakdownTypes(s) +
+      body = summaryHero(s, 'סך הכנסות בחודש') + breakdownPayments(s) + breakdownTypes(s) + breakdownProducts(s) +
         `<section class="card"><h2>לפי שבועות</h2><div class="rows">
           ${s.weeks.map((w, i) => `<button class="row-btn" data-action="sum-week" data-date="${w.from}">
             <div class="row-line ${w.total ? '' : 'zero'}"><span class="lbl">שבוע ${i + 1} <small>${L.shortDate(w.from)}–${L.shortDate(w.to)}${w.count ? ` · ${w.count} טיפולים` : ''}</small></span><span class="val">${money(w.total)}</span></div>
@@ -479,23 +576,73 @@
   }
 
   /* ---------- מסך לקוחות ---------- */
-  function clientListHTML() {
-    const all = L.clientsIndex(state.appts).sort((a, b) => b.lastDate.localeCompare(a.lastDate));
-    const list = L.searchClients(all, state.clientQuery);
-    if (!all.length) return '<div class="card empty"><span class="emoji">👩</span>עדיין אין לקוחות.<br>הן יופיעו כאן אחרי שתוסיפי טיפול.</div>';
-    if (!list.length) return '<div class="card empty">לא נמצאה לקוחה בשם הזה</div>';
-    return `<p class="settings-note">${list.length} לקוחות</p>` + list.map((c) => `
-      <button class="client-row" data-action="open-client" data-key="${esc(c.key)}">
+  // לקוחות שהיו אצלך, ואחריהן אנשי קשר מהטלפון שעוד לא קבעו טיפול
+  function peopleIndex() {
+    const clients = L.clientsIndex(state.appts).sort((a, b) => b.lastDate.localeCompare(a.lastDate));
+    const taken = new Set(clients.map((c) => c.key));
+    const contacts = [];
+    state.contacts.forEach((c, i) => {
+      if (!L.normName(c.name) || taken.has(L.normName(c.name))) return;
+      contacts.push({ key: 'contact:' + i, name: c.name, phone: c.phone, visits: 0, total: 0, lastDate: '', appts: [], contact: true });
+    });
+    contacts.sort((a, b) => a.name.localeCompare(b.name, 'he'));
+    return { clients, contacts };
+  }
+
+  function findPerson(key) {
+    const { clients, contacts } = peopleIndex();
+    return clients.find((c) => c.key === key) || contacts.find((c) => c.key === key);
+  }
+
+  const CONTACTS_PAGE = 200;
+
+  function clientRow(c) {
+    if (c.contact) {
+      return `<button class="client-row contact" data-action="open-client" data-key="${esc(c.key)}">
+        <span class="avatar soft">${esc(initial(c.name))}</span>
+        <span class="cr-main"><b>${esc(c.name)}</b><span class="phone">${esc(c.phone)}</span></span>
+        <span class="cr-chev">${I.left}</span>
+      </button>`;
+    }
+    return `<button class="client-row" data-action="open-client" data-key="${esc(c.key)}">
         <span class="avatar">${esc(initial(c.name))}</span>
         <span class="cr-main"><b>${esc(c.name)}</b>
           <span>${c.visits} ביקורים · אחרון ${L.shortDate(c.lastDate)}.${c.lastDate.slice(2, 4)}</span></span>
         <span class="cr-total">${money(c.total)}</span>
-      </button>`).join('');
+      </button>`;
+  }
+
+  function clientListHTML() {
+    const { clients, contacts } = peopleIndex();
+    if (!clients.length && !contacts.length) {
+      return `<div class="card empty"><span class="emoji">👩</span>עדיין אין לקוחות.<br>הן יופיעו כאן אחרי שתוסיפי טיפול,
+        או אחרי ייבוא אנשי הקשר מהטלפון.
+        <div style="margin-top:14px"><button class="btn secondary" data-action="open-settings">ייבוא אנשי קשר</button></div></div>`;
+    }
+    const q = state.clientQuery;
+    const fc = L.searchClients(clients, q);
+    const ft = L.searchClients(contacts, q);
+    const f = state.clientFilter;
+    const chips = contacts.length ? `<div class="filter-chips">
+      ${[['all', 'הכול', fc.length + ft.length], ['clients', 'לקוחות', fc.length], ['contacts', 'אנשי קשר', ft.length]].map(([id, lbl, n]) =>
+        `<button class="${f === id ? 'on' : ''}" data-action="client-filter" data-f="${id}">${lbl} <small>${n}</small></button>`).join('')}
+    </div>` : '';
+    let html = chips;
+    if (f !== 'contacts' && fc.length) {
+      html += (contacts.length ? `<h3 class="list-head">לקוחות שהיו אצלך</h3>` : `<p class="settings-note">${fc.length} לקוחות</p>`) + fc.map(clientRow).join('');
+    }
+    if (f !== 'clients' && ft.length) {
+      html += `<h3 class="list-head">מאנשי הקשר בטלפון</h3>` + ft.slice(0, CONTACTS_PAGE).map(clientRow).join('');
+      if (ft.length > CONTACTS_PAGE) html += `<p class="settings-note" style="text-align:center">מוצגים ${CONTACTS_PAGE} מתוך ${ft.length}. הקלידי שם כדי למצוא מישהי מסוימת.</p>`;
+    }
+    const shown = (f !== 'contacts' ? fc.length : 0) + (f !== 'clients' ? ft.length : 0);
+    if (!shown) html += '<div class="card empty">לא נמצאה לקוחה בשם הזה</div>';
+    return html;
   }
 
   function viewClients() {
     return `
-      <div class="vhead"><div class="vhead-title"><h1>לקוחות</h1><p class="sub">חיפוש והיסטוריית טיפולים</p></div></div>
+      <div class="vhead"><div class="vhead-title"><h1>לקוחות</h1><p class="sub">חיפוש, היסטוריה ואנשי קשר</p></div></div>
       <div class="search">${I.search}
         <input id="clientSearch" type="search" placeholder="חיפוש לפי שם או טלפון" value="${esc(state.clientQuery)}" autocomplete="off" enterkeyhint="search">
       </div>
@@ -503,14 +650,14 @@
   }
 
   function openClient(key) {
-    const c = L.clientsIndex(state.appts).find((x) => x.key === key);
+    const c = findPerson(key);
     if (!c) return;
     const hist = [...c.appts].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
     const intl = L.toIntlPhone(c.phone);
     openSheet(`
       <div class="sheet-head">
         <button class="btn ghost" data-action="close-sheet">סגירה</button>
-        <h2>כרטיס לקוחה</h2>
+        <h2>${c.contact ? 'איש קשר' : 'כרטיס לקוחה'}</h2>
         <span style="width:80px"></span>
       </div>
       <div class="sheet-body">
@@ -523,18 +670,19 @@
           <a class="btn secondary" href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}">${I.phone}חיוג</a>
           <a class="btn wa" href="https://wa.me/${intl}" target="_blank" rel="noopener">${I.wa}וואטסאפ</a>
         </div>` : ''}
-        <div class="stat-grid">
+        ${c.contact ? '' : `<div class="stat-grid">
           <div class="stat"><small>ביקורים</small><b>${c.visits}</b></div>
           <div class="stat"><small>סכום כולל</small><b>${money(c.total)}</b></div>
-        </div>
+        </div>`}
         <button class="btn" data-action="new-appt-client" data-key="${esc(c.key)}" style="margin-bottom:14px">${I.plus}טיפול חדש ל${esc(c.name)}</button>
+        ${c.contact ? '<div class="card empty">עוד לא היו טיפולים 🌸</div>' : `
         <section class="card"><h2>היסטוריית טיפולים <small>(${hist.length})</small></h2>
           ${hist.map((a) => `<button class="history-item" data-action="edit-appt" data-id="${a.id}">
             <span class="hi-date"><b>${L.shortDate(a.date)}${a.date.slice(0, 4) === today().slice(0, 4) ? '' : '.' + a.date.slice(2, 4)}</b><small>${esc(a.time)}</small></span>
-            <span class="hi-main">${esc(L.treatmentNames(a))}${a.notes ? `<br><small class="muted">${esc(a.notes)}</small>` : ''}</span>
+            <span class="hi-main"><i class="dot" style="background:${apptColor(a)}"></i> ${esc(L.treatmentNames(a) || L.productNames(a))}${a.notes ? `<br><small class="muted">${esc(a.notes)}</small>` : ''}</span>
             <span style="text-align:center"><span class="hi-price">${money(L.apptTotal(a))}</span><br><span class="pill ${a.status}">${L.statusLabel(a.status)}</span></span>
           </button>`).join('')}
-        </section>
+        </section>`}
       </div>`);
   }
 
@@ -559,18 +707,61 @@
       </div>
 
       <section class="card">
-        <h2>סוגי טיפולים ומחירים</h2>
-        <p class="settings-note">המחיר והמשך מתמלאים אוטומטית בטיפול חדש, ואפשר לשנות אותם לכל לקוחה.</p>
+        <h2>סוגי טיפולים, צבעים ומחירים</h2>
+        <p class="settings-note">לחצי על העיגול הצבעוני כדי לבחור צבע לטיפול. לכל סוג אפשר להוסיף תתי-סוגים, למשל סוגי טיפולי פנים או אזורים בהסרת שיער, עם מחיר ומשך משלהם.</p>
         <div id="typesList">
           ${st.treatmentTypes.map((t) => `
-            <div class="type-row" data-type-id="${t.id}">
-              <div><label>שם הטיפול</label><input type="text" data-field="name" value="${esc(t.name)}" placeholder="למשל: פילינג"></div>
-              <div><label>מחיר ₪</label><input type="number" inputmode="decimal" min="0" data-field="price" value="${esc(t.price)}" class="ltr"></div>
-              <div><label>משך (דק׳)</label><input type="number" inputmode="numeric" min="5" step="5" data-field="duration" value="${esc(t.duration)}" class="ltr"></div>
-              <button class="del" data-action="del-type" data-id="${t.id}" aria-label="מחיקת ${esc(t.name)}">${I.trash}</button>
+            <div class="type-card" data-type-id="${t.id}" style="--tc:${t.color}">
+              <div class="type-head">
+                <button class="color-btn" data-action="pick-color" data-id="${t.id}" aria-label="בחירת צבע ל${esc(t.name)}"></button>
+                <input type="text" data-field="name" value="${esc(t.name)}" placeholder="שם הטיפול" aria-label="שם הטיפול">
+                <button class="del" data-action="del-type" data-id="${t.id}" aria-label="מחיקת ${esc(t.name)}">${I.trash}</button>
+              </div>
+              ${t.subs.length ? `<div class="subs">
+                <div class="sub-row sub-labels"><span>תת-סוג</span><span>מחיר ₪</span><span>דקות</span><span></span></div>
+                ${t.subs.map((sb) => `
+                <div class="sub-row" data-sub-id="${sb.id}">
+                  <input type="text" data-field="name" value="${esc(sb.name)}" placeholder="למשל: רגליים" aria-label="שם תת-הסוג">
+                  <input type="number" inputmode="decimal" min="0" data-field="price" value="${esc(sb.price)}" class="ltr" aria-label="מחיר">
+                  <input type="number" inputmode="numeric" min="0" step="5" data-field="duration" value="${esc(sb.duration)}" class="ltr" aria-label="משך בדקות">
+                  <button class="del" data-action="del-sub" data-type="${t.id}" data-id="${sb.id}" aria-label="מחיקת ${esc(sb.name)}">${I.x}</button>
+                </div>`).join('')}
+              </div>` : `<div class="type-nums">
+                <label>מחיר ₪<input type="number" inputmode="decimal" min="0" data-field="price" value="${esc(t.price)}" class="ltr"></label>
+                <label>משך (דק׳)<input type="number" inputmode="numeric" min="5" step="5" data-field="duration" value="${esc(t.duration)}" class="ltr"></label>
+              </div>`}
+              <button class="link-btn" data-action="add-sub" data-type="${t.id}">+ הוספת תת-סוג</button>
             </div>`).join('')}
         </div>
         <button class="btn secondary" data-action="add-type" style="margin-top:12px">${I.plus}הוספת סוג טיפול</button>
+      </section>
+
+      <section class="card">
+        <h2>תכשירים למכירה</h2>
+        <p class="settings-note">תכשירים שלקוחות קונות. בטיפול אפשר לבחור אותם, לשנות כמות ומחיר, והם נספרים בהכנסות.</p>
+        <div id="productsList">
+          ${st.products.length ? st.products.map((pr) => `
+            <div class="sub-row prod" data-product-id="${pr.id}">
+              <input type="text" data-field="name" value="${esc(pr.name)}" placeholder="למשל: קרם לחות" aria-label="שם התכשיר">
+              <input type="number" inputmode="decimal" min="0" data-field="price" value="${esc(pr.price)}" class="ltr" aria-label="מחיר">
+              <button class="del" data-action="del-product" data-id="${pr.id}" aria-label="מחיקת ${esc(pr.name)}">${I.x}</button>
+            </div>`).join('') : '<p class="muted" style="margin:0 0 4px">עדיין אין תכשירים.</p>'}
+        </div>
+        <button class="btn secondary" data-action="add-product" style="margin-top:12px">${I.plus}הוספת תכשיר</button>
+      </section>
+
+      <section class="card">
+        <h2>התראה לפני טיפול</h2>
+        <p class="settings-note">האייפון יתריע לפני כל טיפול שהוספת ליומן של האייפון, גם כשהאפליקציה סגורה. בכרטיס של כל טיפול יש כפתור "התראה".</p>
+        <div class="field">
+          <label for="alarmMin">כמה זמן לפני הטיפול?</label>
+          <select id="alarmMin">${ALARM_OPTIONS.map((m) => `<option value="${m}" ${st.alarmMinutes === m ? 'selected' : ''}>${m === 60 ? 'שעה' : `${m} דקות`} לפני</option>`).join('')}</select>
+        </div>
+        <label class="switch-row">
+          <span class="sr-text"><b>לשאול אחרי כל טיפול חדש</b><small>"להוסיף ליומן האייפון?"</small></span>
+          <span class="switch"><input id="askCal" type="checkbox" ${st.askCalendar ? 'checked' : ''}><span></span></span>
+        </label>
+        <button class="btn secondary" data-action="cal-add-upcoming">${I.bell}הוספת כל התורים הקרובים ליומן</button>
       </section>
 
       <section class="card">
@@ -591,7 +782,7 @@
 
       <section class="card">
         <h2>אנשי קשר מהטלפון</h2>
-        <p class="settings-note">אחרי הייבוא, כשמקלידים שם בטיפול חדש יופיעו גם אנשי הקשר מהטלפון והמספר יתמלא לבד. ברשימת "לקוחות" יופיעו רק מי שקבעה טיפול.</p>
+        <p class="settings-note">אחרי הייבוא אנשי הקשר יופיעו במסך "לקוחות", וכשמקלידים שם בטיפול חדש הם יוצעו והטלפון יתמלא לבד.</p>
         <div class="kv"><span>אנשי קשר מיובאים</span><b>${state.contacts.length}</b></div>
         ${state.meta.contactsImportedAt ? `<div class="kv"><span>ייבוא אחרון</span><b>${new Date(state.meta.contactsImportedAt).toLocaleDateString('he-IL')}</b></div>` : ''}
         <details class="howto">
@@ -618,7 +809,59 @@
           <button class="btn secondary" data-action="import">${I.upload}ייבוא גיבוי</button>
         </div>
       </section>
-      <p class="settings-note" style="text-align:center">היומן של סימה · גרסה 1.0</p>`;
+      <p class="settings-note" style="text-align:center">היומן של סימה · גרסה 1.1</p>`;
+  }
+
+  function focusLast(sel) {
+    const all = $$(sel);
+    const inp = all[all.length - 1];
+    if (!inp) return;
+    inp.scrollIntoView({ block: 'center' });
+    inp.focus();
+  }
+
+  function paletteHTML(current) {
+    return `<div class="palette">${PALETTE.map((p) =>
+      `<button type="button" class="swatch-btn ${p.c === current ? 'on' : ''}" data-color="${p.c}" style="--c:${p.c}" aria-label="${p.n}" aria-pressed="${p.c === current}">
+        <i></i><span>${p.n}</span></button>`).join('')}</div>`;
+  }
+
+  // דיאלוג כללי עם כפתורי data-r; onClick מקבל כל לחיצה אחרת בתוך הדיאלוג
+  function openDialog(html, { onClick, validate } = {}) {
+    return new Promise((resolve) => {
+      const wrap = $('#dialogWrap');
+      $('#dialog').innerHTML = html;
+      wrap.classList.add('open');
+      wrap.setAttribute('aria-hidden', 'false');
+      wrap.onclick = (e) => {
+        const b = e.target.closest('[data-r]');
+        if (!b) { if (onClick) onClick(e); return; }
+        if (b.dataset.r === '1' && validate && !validate()) return;
+        wrap.classList.remove('open');
+        wrap.setAttribute('aria-hidden', 'true');
+        wrap.onclick = null;
+        resolve(b.dataset.r === '1');
+      };
+    });
+  }
+
+  function bindPalette(state0, onPick) {
+    return (e) => {
+      const b = e.target.closest('[data-color]');
+      if (!b) return;
+      $$('#dialog .swatch-btn').forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
+      onPick(b.dataset.color);
+    };
+  }
+
+  async function pickColor(current, name) {
+    let chosen = current;
+    const ok = await openDialog(`
+      <h3>צבע ל${esc(name || 'טיפול')}</h3>
+      ${paletteHTML(current)}
+      <div class="btn-row"><button class="btn" data-r="1">בחירה</button><button class="btn ghost" data-r="0">ביטול</button></div>`,
+    { onClick: bindPalette(current, (c) => { chosen = c; }) });
+    return ok ? chosen : null;
   }
 
   /* ---------- טופס טיפול ---------- */
@@ -689,8 +932,15 @@
         <div class="field">
           <span class="field-label">סוג טיפול <small>(אפשר לבחור כמה)</small></span>
           <div class="chips" id="typeChips"></div>
-          <div class="items" id="items"></div>
+          <div id="subPanel"></div>
         </div>
+
+        <div class="field">
+          <span class="field-label">תכשירים שנקנו <small>(לא חובה)</small></span>
+          <div class="chips" id="productChips"></div>
+        </div>
+
+        <div class="items" id="items"></div>
 
         <div class="two-col">
           <div class="field"><label for="fDur">משך כולל (דקות)</label>
@@ -704,7 +954,7 @@
         <div class="field">
           <span class="field-label">אמצעי תשלום</span>
           <div class="pay-grid" id="payGrid">
-            ${L.PAYMENTS.map((p) => `<button type="button" class="pay-btn ${f.payment === p.id ? 'on' : ''}" data-action="f-pay" data-pay="${p.id}" aria-pressed="${f.payment === p.id}">${esc(p.label)}</button>`).join('')}
+            ${L.PAYMENTS.concat(L.LEGACY_PAYMENTS.filter((p) => p.id === f.payment)).map((p) => `<button type="button" class="pay-btn ${f.payment === p.id ? 'on' : ''}" data-action="f-pay" data-pay="${p.id}" aria-pressed="${f.payment === p.id}">${esc(p.label)}</button>`).join('')}
           </div>
         </div>
 
@@ -743,19 +993,70 @@
 
   function renderFormItems() {
     const types = state.settings.treatmentTypes;
-    const selectedTypeIds = new Set(form.items.map((i) => i.typeId));
-    $('#typeChips').innerHTML = types.map((t) => `
-      <button type="button" class="chip ${selectedTypeIds.has(t.id) ? 'on' : ''}" data-action="f-type" data-type="${t.id}" aria-pressed="${selectedTypeIds.has(t.id)}">
-        ${selectedTypeIds.has(t.id) ? I.check : ''}${esc(t.name || 'ללא שם')}</button>`).join('') +
-      '<button type="button" class="chip add" data-action="f-new-type">+ סוג חדש</button>';
+    const sel = form.items;
+    const countFor = (tid) => sel.filter((i) => !L.isProduct(i) && i.typeId === tid).length;
 
-    $('#items').innerHTML = form.items.map((it, idx) => `
-      <div class="item-row">
-        <div class="item-name">${esc(it.name)}<small>${Number(it.duration) || 0} דק׳</small></div>
-        <label class="price-input"><span>₪</span><input type="number" inputmode="decimal" min="0" data-item="${idx}" value="${esc(it.price)}" aria-label="מחיר ${esc(it.name)}"></label>
-        <button type="button" class="rm" data-action="f-rm-item" data-idx="${idx}" aria-label="הסרת ${esc(it.name)}">${I.x}</button>
-      </div>`).join('');
+    $('#typeChips').innerHTML = types.map((t) => {
+      const n = countFor(t.id);
+      const hasSubs = t.subs.length > 0;
+      const open = form.openType === t.id;
+      return `<button type="button" class="chip tchip ${n ? 'on' : ''} ${open ? 'open' : ''}" style="--tc:${t.color}"
+        data-action="f-type" data-type="${t.id}" aria-pressed="${!!n}" ${hasSubs ? `aria-expanded="${open}"` : ''}>
+        <i class="dot"></i>${esc(t.name || 'ללא שם')}${hasSubs ? `<span class="chev">${n > 1 ? n + ' ' : ''}${open ? '▴' : '▾'}</span>` : ''}</button>`;
+    }).join('') + '<button type="button" class="chip add" data-action="f-new-type">+ סוג חדש</button>';
+
+    const ot = form.openType && typeById(form.openType);
+    $('#subPanel').innerHTML = ot ? `
+      <div class="sub-panel" style="--tc:${ot.color}">
+        <div class="sub-title">${esc(ot.name)}: מה עושים? <small>(אפשר כמה)</small></div>
+        <div class="chips">
+          ${ot.subs.map((sb) => {
+            const on = sel.some((i) => i.typeId === ot.id && i.subId === sb.id);
+            return `<button type="button" class="chip tchip ${on ? 'on' : ''}" style="--tc:${ot.color}" data-action="f-sub" data-type="${ot.id}" data-sub="${sb.id}" aria-pressed="${on}">
+              ${esc(sb.name || 'ללא שם')}<small>${money(sb.price)}</small></button>`;
+          }).join('')}
+          ${(() => { const on = sel.some((i) => i.typeId === ot.id && !i.subId); return `<button type="button" class="chip tchip ${on ? 'on' : ''}" style="--tc:${ot.color}" data-action="f-sub" data-type="${ot.id}" data-sub="" aria-pressed="${on}">כללי<small>${money(ot.price)}</small></button>`; })()}
+          <button type="button" class="chip add" data-action="f-new-sub" data-type="${ot.id}">+ תת-סוג חדש</button>
+        </div>
+      </div>` : '';
+
+    $('#productChips').innerHTML = state.settings.products.map((pr) => {
+      const on = sel.some((i) => L.isProduct(i) && i.productId === pr.id);
+      return `<button type="button" class="chip ${on ? 'on' : ''}" data-action="f-product" data-product="${pr.id}" aria-pressed="${on}">
+        ${I.bag}${esc(pr.name || 'ללא שם')}<small>${money(pr.price)}</small></button>`;
+    }).join('') + '<button type="button" class="chip add" data-action="f-new-product">+ תכשיר חדש</button>';
+
+    $('#items').innerHTML = sel.length ? `<span class="field-label">מה נבחר</span>` + sel.map((it, idx) => `
+      <div class="item-row" style="--tc:${itemColor(it)}">
+        <i class="dot big"></i>
+        <div class="item-name">${esc(L.itemLabel(it))}<small>${L.isProduct(it) ? 'תכשיר' : `${Number(it.duration) || 0} דק׳`}</small></div>
+        ${L.isProduct(it) ? `<div class="qty" aria-label="כמות">
+          <button type="button" data-action="f-qty" data-idx="${idx}" data-d="1" aria-label="עוד אחד">+</button>
+          <b>${L.itemQty(it)}</b>
+          <button type="button" data-action="f-qty" data-idx="${idx}" data-d="-1" aria-label="אחד פחות">−</button></div>` : ''}
+        <label class="price-input"><span>₪</span><input type="number" inputmode="decimal" min="0" data-item="${idx}" value="${esc(it.price)}" aria-label="מחיר ${esc(L.itemLabel(it))}"></label>
+        <button type="button" class="rm" data-action="f-rm-item" data-idx="${idx}" aria-label="הסרת ${esc(L.itemLabel(it))}">${I.x}</button>
+      </div>`).join('') : '';
     updateFormTotals();
+  }
+
+  function treatmentItem(t, sb) {
+    return {
+      kind: 'treatment', typeId: t.id, subId: sb ? sb.id : null, name: t.name, sub: sb ? sb.name : '',
+      price: sb ? sb.price : t.price, duration: sb ? (sb.duration || t.duration) : t.duration, color: t.color,
+    };
+  }
+
+  function productItem(pr) {
+    return { kind: 'product', productId: pr.id, name: pr.name, price: pr.price, qty: 1, duration: 0 };
+  }
+
+  function toggleItem(match, make) {
+    const idx = form.items.findIndex(match);
+    if (idx >= 0) form.items.splice(idx, 1);
+    else form.items.push(make());
+    recalcDuration();
+    renderFormItems();
   }
 
   function updateFormTotals() {
@@ -846,42 +1147,50 @@
     });
   }
 
-  async function addTypeFromForm() {
-    const html = `
-      <h3>סוג טיפול חדש</h3>
-      <div class="field" style="text-align:start"><label for="ntName">שם</label><input id="ntName" type="text" placeholder="למשל: פילינג"></div>
+  // הוספת סוג טיפול / תת-סוג / תכשיר חדש ישירות מתוך הטופס
+  async function addFromForm(kind, parent) {
+    const title = kind === 'type' ? 'סוג טיפול חדש' : kind === 'sub' ? `תת-סוג ל${parent.name}` : 'תכשיר חדש';
+    const hint = kind === 'type' ? 'למשל: פילינג' : kind === 'sub' ? 'למשל: רגליים' : 'למשל: קרם לחות';
+    let color = kind === 'type' ? nextFreeColor() : null;
+    const ok = await openDialog(`
+      <h3>${esc(title)}</h3>
+      <div class="field" style="text-align:start"><label for="ntName">שם</label><input id="ntName" type="text" placeholder="${hint}"></div>
       <div class="two-col" style="text-align:start">
-        <div class="field"><label for="ntPrice">מחיר ₪</label><input id="ntPrice" type="number" inputmode="decimal" class="ltr"></div>
-        <div class="field"><label for="ntDur">משך (דק׳)</label><input id="ntDur" type="number" inputmode="numeric" class="ltr" value="30"></div>
+        <div class="field"><label for="ntPrice">מחיר ₪</label><input id="ntPrice" type="number" inputmode="decimal" class="ltr" value="${kind === 'sub' ? esc(parent.price) : ''}"></div>
+        ${kind === 'product' ? '' : `<div class="field"><label for="ntDur">משך (דק׳)</label><input id="ntDur" type="number" inputmode="numeric" class="ltr" value="${kind === 'sub' ? esc(parent.duration) : 30}"></div>`}
       </div>
-      <div class="btn-row"><button class="btn" data-r="1">הוספה</button><button class="btn ghost" data-r="0">ביטול</button></div>`;
-    const wrap = $('#dialogWrap');
-    $('#dialog').innerHTML = html;
-    wrap.classList.add('open');
-    setTimeout(() => $('#ntName').focus(), 50);
-    const ok = await new Promise((resolve) => {
-      wrap.onclick = (e) => {
-        const b = e.target.closest('[data-r]');
-        if (!b) return;
-        if (b.dataset.r === '1' && !$('#ntName').value.trim()) { $('#ntName').classList.add('invalid'); return; }
-        resolve(b.dataset.r === '1');
-      };
+      ${kind === 'type' ? `<div class="field-label" style="text-align:start">צבע</div>${paletteHTML(color)}` : ''}
+      <div class="btn-row"><button class="btn" data-r="1">הוספה</button><button class="btn ghost" data-r="0">ביטול</button></div>`, {
+      onClick: kind === 'type' ? bindPalette(color, (c) => { color = c; }) : null,
+      validate: () => {
+        if ($('#ntName').value.trim()) return true;
+        $('#ntName').classList.add('invalid');
+        $('#ntName').focus();
+        return false;
+      },
     });
-    const t = {
-      id: 't-' + uid(),
-      name: $('#ntName').value.trim(),
-      price: Number($('#ntPrice').value) || 0,
-      duration: Number($('#ntDur').value) || 30,
-    };
-    wrap.classList.remove('open');
-    wrap.onclick = null;
     if (!ok) return;
-    state.settings.treatmentTypes.push(t);
+    const name = $('#ntName').value.trim();
+    const price = Number($('#ntPrice').value) || 0;
+    const duration = $('#ntDur') ? (Number($('#ntDur').value) || 30) : 0;
+    if (kind === 'type') {
+      const t = { id: 't-' + uid(), name, price, duration, color, subs: [] };
+      state.settings.treatmentTypes.push(t);
+      form.items.push(treatmentItem(t));
+    } else if (kind === 'sub') {
+      const sb = { id: 's-' + uid(), name, price, duration };
+      parent.subs.push(sb);
+      form.items.push(treatmentItem(parent, sb));
+      form.openType = parent.id;
+    } else {
+      const pr = { id: 'p-' + uid(), name, price };
+      state.settings.products.push(pr);
+      form.items.push(productItem(pr));
+    }
     await saveSettings();
-    form.items.push({ typeId: t.id, name: t.name, price: t.price, duration: t.duration });
     recalcDuration();
     renderFormItems();
-    toast(`"${t.name}" נוסף לרשימה`);
+    toast(`"${name}" נוסף לרשימה`);
   }
 
   async function saveForm() {
@@ -896,7 +1205,7 @@
     if (!form.clientName) { problems.push('שם הלקוחה'); $('#fName').classList.add('invalid'); }
     if (!form.date) problems.push('תאריך');
     if (!form.time) problems.push('שעה');
-    if (!form.items.length) problems.push('סוג טיפול');
+    if (!form.items.length) problems.push('טיפול או תכשיר');
     if (problems.length) {
       toast(`חסר: ${problems.join(', ')}`);
       return;
@@ -917,25 +1226,53 @@
     }
 
     const existing = form.id ? findAppt(form.id) : null;
+    const moved = existing && (existing.date !== form.date || existing.time !== form.time);
+    if (moved) {
+      // מועד חדש: צריך תזכורת חדשה, וטיפול שבוטל חוזר ל"ממתינה"
+      if (form.reminderSent && existing.reminderSent) form.reminderSent = false;
+      if (existing.status === 'cancelled' && form.status === 'cancelled') form.status = 'pending';
+    }
     const a = {
       id: form.id || uid(),
       clientName: form.clientName,
       phone: form.phone,
       date: form.date,
       time: form.time,
-      items: form.items.map((i) => ({ typeId: i.typeId || null, name: i.name, price: L.num(i.price), duration: Number(i.duration) || 0 })),
+      items: form.items.map(cleanItem),
       duration: form.duration || L.DEFAULT_DURATION,
       payment: form.payment || '',
       status: form.status || 'pending',
       reminderSent: !!form.reminderSent,
       reminderSentAt: form.reminderSent ? (form.reminderSentAt || Date.now()) : null,
       notes: form.notes,
+      calendarAddedAt: existing && !moved ? existing.calendarAddedAt || null : null,
       createdAt: existing ? existing.createdAt : Date.now(),
     };
     await saveAppt(a);
     closeSheet();
-    toast(existing ? 'הטיפול עודכן' : 'הטיפול נשמר 🌸');
+    toast(existing ? (moved ? `הועבר ליום ${L.dayName(a.date)} ${L.shortDate(a.date)} ב-${a.time}` : 'הטיפול עודכן') : 'הטיפול נשמר 🌸');
     render();
+    if (!existing) offerCalendar(a);
+    else if (moved) afterMove(existing, a);
+  }
+
+  function cleanItem(i) {
+    const it = {
+      kind: i.kind === 'product' ? 'product' : 'treatment',
+      typeId: i.typeId || null,
+      name: String(i.name || ''),
+      price: L.num(i.price),
+      duration: Number(i.duration) || 0,
+    };
+    if (it.kind === 'product') {
+      it.productId = i.productId || null;
+      it.qty = L.itemQty(i);
+    } else {
+      it.subId = i.subId || null;
+      it.sub = String(i.sub || '');
+      it.color = i.color || '';
+    }
+    return it;
   }
 
   async function deleteFromForm() {
@@ -950,8 +1287,104 @@
     state.appts = state.appts.filter((x) => x.id !== a.id);
     await state.store.deleteAppointment(a.id);
     closeSheet();
-    toast('הטיפול נמחק');
+    toast(a.calendarAddedAt ? 'נמחק. אם הוא ביומן האייפון, מחקי אותו גם שם' : 'הטיפול נמחק');
     render();
+  }
+
+  /* ---------- העברת טיפול ליום אחר ---------- */
+  async function moveAppt(a) {
+    const warn = () => {
+      const d = $('#mvDate').value;
+      const t = $('#mvTime').value;
+      const ov = d && t ? L.findOverlaps(state.appts, { ...a, date: d, time: t, status: 'pending' }) : [];
+      $('#mvWarn').innerHTML = ov.length
+        ? `<div class="warn-box" style="text-align:start">⚠️ חפיפה עם ${ov.map((o) => `${esc(o.clientName)} (${esc(o.time)}–${L.apptEnd(o)})`).join(', ')}</div>` : '';
+    };
+    const dialog = openDialog(`
+      <h3>העברת טיפול ליום אחר</h3>
+      <p>${esc(a.clientName)} · כרגע ביום ${L.dayName(a.date)} ${L.shortDate(a.date)} בשעה ${esc(a.time)}</p>
+      <div class="two-col" style="text-align:start">
+        <div class="field"><label for="mvDate">תאריך חדש</label><input id="mvDate" type="date" value="${a.date}"></div>
+        <div class="field"><label for="mvTime">שעה</label><input id="mvTime" type="time" step="300" value="${esc(a.time)}"></div>
+      </div>
+      <div id="mvWarn"></div>
+      <div class="btn-row"><button class="btn" data-r="1">${I.move}העברה</button><button class="btn ghost" data-r="0">ביטול</button></div>`, {
+      validate: () => !!($('#mvDate').value && $('#mvTime').value),
+    });
+    $('#mvDate').addEventListener('change', warn);
+    $('#mvTime').addEventListener('change', warn);
+    const ok = await dialog;
+    if (!ok) return;
+    const date = $('#mvDate').value;
+    const time = $('#mvTime').value;
+    if (date === a.date && time === a.time) return;
+    const moved = {
+      ...a, date, time,
+      status: a.status === 'cancelled' ? 'pending' : a.status,
+      reminderSent: false, reminderSentAt: null, calendarAddedAt: null,
+    };
+    await saveAppt(moved);
+    render();
+    toast(`הועבר ליום ${L.dayName(date)} ${L.shortDate(date)} ב-${time}`);
+    afterMove(a, moved);
+  }
+
+  async function afterMove(before, after) {
+    if (before.calendarAddedAt) {
+      const ok = await ask({
+        title: 'לעדכן ביומן האייפון?',
+        text: `המועד הישן (${L.shortDate(before.date)} ב-${before.time}) נשאר ביומן של האייפון, וצריך למחוק אותו שם.\nלהוסיף את המועד החדש עם התראה?`,
+        ok: 'הוספת המועד החדש', cancel: 'לא עכשיו',
+      });
+      if (ok) addToPhoneCalendar([after]);
+    } else {
+      offerCalendar(after);
+    }
+  }
+
+  /* ---------- יומן האייפון ---------- */
+  const isFuture = (a) => `${a.date}T${a.time}` > `${today()}T${new Date().toTimeString().slice(0, 5)}`;
+
+  async function offerCalendar(a) {
+    if (!state.settings.askCalendar || !L.isCounted(a) || !isFuture(a)) return;
+    const ok = await ask({
+      title: 'להוסיף ליומן האייפון?',
+      text: `כך האייפון יתריע ${state.settings.alarmMinutes === 60 ? 'שעה' : `${state.settings.alarmMinutes} דקות`} לפני הטיפול, גם כשהאפליקציה סגורה.`,
+      ok: 'הוספה ליומן', cancel: 'לא עכשיו',
+    });
+    if (ok) addToPhoneCalendar([a]);
+  }
+
+  // פותח קובץ ics: באייפון נפתח חלון "הוספה ללוח השנה", במחשב הקובץ יורד
+  async function addToPhoneCalendar(list) {
+    if (!list.length) return;
+    const ics = L.buildICS(list, { alarmMinutes: state.settings.alarmMinutes, businessName: state.settings.businessName });
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.maxTouchPoints > 1 && /Mac/.test(navigator.platform));
+    if (apple) {
+      window.location.href = url;
+    } else {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = list.length === 1 ? `tor-${list[0].date}.ics` : 'torim.ics';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    const now = Date.now();
+    for (const a of list) {
+      const cur = findAppt(a.id);
+      if (cur) await saveAppt({ ...cur, calendarAddedAt: now });
+    }
+    render();
+  }
+
+  function upcomingNotInCalendar() {
+    const until = L.addDays(today(), 30);
+    return sortByTime(state.appts.filter((a) => L.isCounted(a) && !a.calendarAddedAt && isFuture(a) && a.date <= until))
+      .sort((a, b) => a.date.localeCompare(b.date));
   }
 
   /* ---------- גיבוי ---------- */
@@ -962,6 +1395,7 @@
       exportedAt: new Date().toISOString(),
       appointments: state.appts,
       settings: state.settings,
+      contacts: state.contacts,
     };
   }
 
@@ -1005,27 +1439,26 @@
       phone: String(a.phone || ''),
       date: a.date,
       time: /^\d{2}:\d{2}$/.test(a.time) ? a.time : '09:00',
-      items: Array.isArray(a.items) ? a.items.map((i) => ({
-        typeId: i.typeId || null, name: String(i.name || ''), price: L.num(i.price), duration: Number(i.duration) || 0,
-      })) : [],
+      items: Array.isArray(a.items) ? a.items.filter(Boolean).map(cleanItem) : [],
       duration: Number(a.duration) || L.DEFAULT_DURATION,
-      payment: L.PAYMENTS.some((p) => p.id === a.payment) ? a.payment : '',
+      payment: L.ALL_PAYMENTS.some((p) => p.id === a.payment) ? a.payment : '',
       status: statuses.has(a.status) ? a.status : 'pending',
       reminderSent: !!a.reminderSent,
       reminderSentAt: a.reminderSentAt || null,
       notes: String(a.notes || ''),
+      calendarAddedAt: a.calendarAddedAt || null,
       createdAt: a.createdAt || Date.now(),
       updatedAt: a.updatedAt || Date.now(),
     }));
     const s = data.settings || {};
-    const settings = {
-      businessName: typeof s.businessName === 'string' ? s.businessName : DEFAULT_SETTINGS.businessName,
-      template: typeof s.template === 'string' && s.template.trim() ? s.template : DEFAULT_SETTINGS.template,
-      treatmentTypes: Array.isArray(s.treatmentTypes) && s.treatmentTypes.length
-        ? s.treatmentTypes.map((t) => ({ id: String(t.id || 't-' + uid()), name: String(t.name || ''), price: L.num(t.price), duration: Number(t.duration) || 30 }))
-        : JSON.parse(JSON.stringify(DEFAULT_TYPES)),
-    };
-    return { appointments: appts, settings };
+    const settings = normalizeSettings({
+      ...s,
+      treatmentTypes: Array.isArray(s.treatmentTypes) && s.treatmentTypes.length ? s.treatmentTypes : JSON.parse(JSON.stringify(DEFAULT_TYPES)),
+    });
+    const contacts = Array.isArray(data.contacts)
+      ? data.contacts.filter((c) => c && c.name && c.phone).map((c) => ({ name: String(c.name), phone: String(c.phone) }))
+      : null;
+    return { appointments: appts, settings, contacts };
   }
 
   async function importBackup(file) {
@@ -1045,6 +1478,10 @@
     state.appts = parsed.appointments;
     state.settings = parsed.settings;
     await state.store.replaceAll({ appointments: state.appts, settings: state.settings, meta: state.meta });
+    if (parsed.contacts) {
+      state.contacts = parsed.contacts;
+      await state.store.setKV('contacts', state.contacts);
+    }
     toast(`שוחזרו ${state.appts.length} טיפולים ✓`);
     render();
   }
@@ -1068,8 +1505,10 @@
     state.meta.contactsImportedAt = Date.now();
     await state.store.setKV('contacts', list);
     await saveMeta();
+    state.clientFilter = 'all';
+    state.clientQuery = '';
+    go('clients');
     toast(`יובאו ${list.length} אנשי קשר ✓`);
-    render();
   }
 
   // בחירת איש קשר ישירות מהטלפון — רק בדפדפנים שתומכים (לרוב לא בספארי)
@@ -1123,14 +1562,34 @@
     }
     if (state.view === 'settings') {
       $('#typesList').addEventListener('change', async (e) => {
-        const row = e.target.closest('[data-type-id]');
-        if (!row) return;
-        const t = state.settings.treatmentTypes.find((x) => x.id === row.dataset.typeId);
         const f = e.target.dataset.field;
+        const card = e.target.closest('[data-type-id]');
+        const t = card && typeById(card.dataset.typeId);
         if (!t || !f) return;
-        t[f] = f === 'name' ? e.target.value.trim() : (Number(e.target.value) || 0);
+        const subRow = e.target.closest('[data-sub-id]');
+        const obj = subRow ? t.subs.find((x) => x.id === subRow.dataset.subId) : t;
+        if (!obj) return;
+        obj[f] = f === 'name' ? e.target.value.trim() : (Number(e.target.value) || 0);
         await saveSettings();
         toast('נשמר');
+      });
+      $('#productsList').addEventListener('change', async (e) => {
+        const f = e.target.dataset.field;
+        const row = e.target.closest('[data-product-id]');
+        const pr = row && state.settings.products.find((x) => x.id === row.dataset.productId);
+        if (!pr || !f) return;
+        pr[f] = f === 'name' ? e.target.value.trim() : (Number(e.target.value) || 0);
+        await saveSettings();
+        toast('נשמר');
+      });
+      $('#alarmMin').addEventListener('change', async (e) => {
+        state.settings.alarmMinutes = Number(e.target.value);
+        await saveSettings();
+        toast('נשמר');
+      });
+      $('#askCal').addEventListener('change', async (e) => {
+        state.settings.askCalendar = e.target.checked;
+        await saveSettings();
       });
       $('#bizName').addEventListener('input', (e) => {
         state.settings.businessName = e.target.value;
@@ -1177,7 +1636,9 @@
     const a = findAppt(id);
     if (!a || a.status === status) return;
     await saveAppt({ ...a, status });
-    toast(`${a.clientName}: ${L.statusLabel(status)}`);
+    toast(status === 'cancelled' && a.calendarAddedAt
+      ? `${a.clientName} ביטלה. מחקי את התור גם מיומן האייפון`
+      : `${a.clientName}: ${L.statusLabel(status)}`);
     render();
   }
 
@@ -1212,7 +1673,7 @@
       setTimeout(() => $('#fName') && $('#fName').focus(), 320);
     },
     'new-appt-client': (el) => {
-      const c = L.clientsIndex(state.appts).find((x) => x.key === el.dataset.key);
+      const c = findPerson(el.dataset.key);
       if (!c) return;
       openApptForm(newForm({ clientName: c.name, phone: c.phone }));
     },
@@ -1224,20 +1685,40 @@
     'save-appt': () => saveForm(),
     'delete-appt': () => deleteFromForm(),
     'f-type': (el) => {
-      const t = state.settings.treatmentTypes.find((x) => x.id === el.dataset.type);
+      const t = typeById(el.dataset.type);
       if (!t) return;
-      const idx = form.items.findIndex((i) => i.typeId === t.id);
-      if (idx >= 0) form.items.splice(idx, 1);
-      else form.items.push({ typeId: t.id, name: t.name, price: t.price, duration: t.duration });
-      recalcDuration();
+      if (t.subs.length) {
+        form.openType = form.openType === t.id ? null : t.id;
+        renderFormItems();
+        return;
+      }
+      toggleItem((i) => !L.isProduct(i) && i.typeId === t.id, () => treatmentItem(t));
+    },
+    'f-sub': (el) => {
+      const t = typeById(el.dataset.type);
+      if (!t) return;
+      const sb = el.dataset.sub ? t.subs.find((x) => x.id === el.dataset.sub) : null;
+      toggleItem((i) => !L.isProduct(i) && i.typeId === t.id && (i.subId || null) === (sb ? sb.id : null), () => treatmentItem(t, sb));
+    },
+    'f-product': (el) => {
+      const pr = state.settings.products.find((x) => x.id === el.dataset.product);
+      if (!pr) return;
+      toggleItem((i) => L.isProduct(i) && i.productId === pr.id, () => productItem(pr));
+    },
+    'f-qty': (el) => {
+      const it = form.items[Number(el.dataset.idx)];
+      if (!it) return;
+      it.qty = Math.max(1, L.itemQty(it) + Number(el.dataset.d));
       renderFormItems();
     },
+    'f-new-sub': (el) => { const t = typeById(el.dataset.type); if (t) addFromForm('sub', t); },
+    'f-new-product': () => addFromForm('product'),
     'f-rm-item': (el) => {
       form.items.splice(Number(el.dataset.idx), 1);
       recalcDuration();
       renderFormItems();
     },
-    'f-new-type': () => addTypeFromForm(),
+    'f-new-type': () => addFromForm('type'),
     'f-pay': (el) => {
       form.payment = form.payment === el.dataset.pay ? '' : el.dataset.pay;
       $$('#payGrid .pay-btn').forEach((b) => {
@@ -1256,6 +1737,22 @@
       updateFormTotals();
     },
     'set-status': (el) => setStatus(el.dataset.id, el.dataset.status),
+    'move-appt': (el) => { const a = findAppt(el.dataset.id); if (a) moveAppt(a); },
+    'cal-add': async (el) => {
+      const a = findAppt(el.dataset.id);
+      if (!a) return;
+      if (a.calendarAddedAt) {
+        const again = await ask({ title: 'כבר נוסף ליומן', text: 'להוסיף שוב? (ייתכן שיופיע פעמיים ביומן האייפון)', ok: 'להוסיף שוב', cancel: 'ביטול' });
+        if (!again) return;
+      }
+      addToPhoneCalendar([a]);
+    },
+    'cal-add-upcoming': async () => {
+      const list = upcomingNotInCalendar();
+      if (!list.length) { toast('כל התורים הקרובים כבר ביומן ✓'); return; }
+      const ok = await ask({ title: `להוסיף ${list.length} תורים ליומן האייפון?`, text: 'כל התורים ב-30 הימים הקרובים שעוד לא נוספו, עם התראה לפני כל אחד.', ok: 'הוספה', cancel: 'ביטול' });
+      if (ok) addToPhoneCalendar(list);
+    },
     'wa-sent': (el) => {
       // הקישור נפתח כרגיל; מסמנים שנשלחה אחרי רגע קצר
       const id = el.dataset.id;
@@ -1283,14 +1780,55 @@
     'sum-week': (el) => { state.sumTab = 'week'; state.sumDate = el.dataset.date; go('summary'); },
     'sum-month': (el) => { state.sumTab = 'month'; state.sumDate = el.dataset.date; go('summary'); },
     'open-client': (el) => openClient(el.dataset.key),
+    'client-filter': (el) => { state.clientFilter = el.dataset.f; $('#clientList').innerHTML = clientListHTML(); },
     'add-type': async () => {
-      state.settings.treatmentTypes.push({ id: 't-' + uid(), name: '', price: 0, duration: 30 });
+      state.settings.treatmentTypes.push({ id: 't-' + uid(), name: '', price: 0, duration: 30, color: nextFreeColor(), subs: [] });
       await saveSettings();
       render();
-      const rows = $$('.type-row');
-      const inp = rows[rows.length - 1].querySelector('[data-field=name]');
-      inp.scrollIntoView({ block: 'center' });
-      inp.focus();
+      focusLast('.type-card .type-head [data-field=name]');
+    },
+    'add-sub': async (el) => {
+      const t = typeById(el.dataset.type);
+      if (!t) return;
+      t.subs.push({ id: 's-' + uid(), name: '', price: t.price, duration: t.duration });
+      await saveSettings();
+      render();
+      focusLast(`[data-type-id="${t.id}"] [data-sub-id] [data-field=name]`);
+    },
+    'del-sub': async (el) => {
+      const t = typeById(el.dataset.type);
+      const sb = t && t.subs.find((x) => x.id === el.dataset.id);
+      if (!sb) return;
+      const ok = await ask({ title: `למחוק את "${sb.name || 'ללא שם'}"?`, text: 'טיפולים שכבר נשמרו לא ישתנו.', ok: 'מחיקה', danger: true });
+      if (!ok) return;
+      t.subs = t.subs.filter((x) => x.id !== sb.id);
+      await saveSettings();
+      render();
+    },
+    'add-product': async () => {
+      state.settings.products.push({ id: 'p-' + uid(), name: '', price: 0 });
+      await saveSettings();
+      render();
+      focusLast('#productsList [data-field=name]');
+    },
+    'del-product': async (el) => {
+      const pr = state.settings.products.find((x) => x.id === el.dataset.id);
+      if (!pr) return;
+      const ok = await ask({ title: `למחוק את "${pr.name || 'ללא שם'}"?`, text: 'טיפולים שכבר נשמרו לא ישתנו.', ok: 'מחיקה', danger: true });
+      if (!ok) return;
+      state.settings.products = state.settings.products.filter((x) => x.id !== pr.id);
+      await saveSettings();
+      render();
+    },
+    'pick-color': async (el) => {
+      const t = typeById(el.dataset.id);
+      if (!t) return;
+      const c = await pickColor(t.color, t.name);
+      if (!c || c === t.color) return;
+      t.color = c;
+      await saveSettings();
+      render();
+      toast('הצבע נשמר');
     },
     'del-type': async (el) => {
       const t = state.settings.treatmentTypes.find((x) => x.id === el.dataset.id);
@@ -1377,10 +1915,10 @@
     state.store = await DB.open();
     const data = await state.store.getAll();
     state.appts = data.appointments || [];
-    state.settings = Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), data.settings || {});
+    state.settings = normalizeSettings(Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), data.settings || {}));
     state.meta = data.meta || {};
     state.contacts = Array.isArray(data.contacts) ? data.contacts : [];
-    if (!data.settings) await saveSettings();
+    await saveSettings();
     render();
 
     DB.requestPersistence();

@@ -2143,7 +2143,7 @@
   /* ---------- הפעלה ---------- */
   async function init() {
     $('#fab').innerHTML = I.plus;
-    $$('[data-icon]').forEach((el) => { el.innerHTML = I[el.dataset.icon]; });
+    $$('[data-icon]').forEach((el) => { el.innerHTML = I[el.dataset.icon] || ''; });
 
     state.store = await DB.open();
     const data = await state.store.getAll();
@@ -2158,7 +2158,17 @@
     // בפיתוח מקומי בלי מטמון, כדי ששינויים ייראו מיד (אפשר לבדוק אופליין עם ?sw=1)
     const dev = location.hostname === 'localhost' && !/[?&]sw=1/.test(location.search);
     if ('serviceWorker' in navigator && location.protocol !== 'file:' && !dev) {
-      navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW', e));
+      // כשגרסה חדשה נכנסת לתוקף, טוענים מחדש פעם אחת כדי שכל הקבצים יהיו מאותה גרסה
+      const hadController = !!navigator.serviceWorker.controller;
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!hadController || reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then((reg) => reg.update())
+        .catch((e) => console.warn('SW', e));
     }
   }
 

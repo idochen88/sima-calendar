@@ -243,6 +243,21 @@
       .map((i) => (itemQty(i) > 1 ? `${i.name} ×${itemQty(i)}` : i.name)).join(', ');
   }
 
+  /* ---------- מחירון ---------- */
+
+  // המחירון מתוך ההגדרות: סוג בלי תתי-סוגים = שורה אחת עם מחיר, סוג עם תתי-סוגים = רשימה
+  function priceList(settings) {
+    const name = (x) => String(x.name || '').trim() || 'ללא שם';
+    const sections = (settings.treatmentTypes || []).map((t) => ({
+      id: t.id, name: name(t), color: t.color || '',
+      price: t.subs && t.subs.length ? null : num(t.price),
+      rows: (t.subs || []).map((sb) => ({ name: name(sb), price: num(sb.price) })),
+    }));
+    const products = (settings.products || []).map((p) => ({ name: name(p), price: num(p.price) }));
+    if (products.length) sections.push({ id: 'products', name: 'תכשירים', color: '', price: null, rows: products, products: true });
+    return sections;
+  }
+
   /* ---------- סיכומים ---------- */
 
   function summarize(appts, from, to) {
@@ -601,7 +616,7 @@
     isProduct, itemQty, itemTotal, itemLabel, productNames, buildICS,
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,
-    normName, clientsIndex, searchClients, parseVCards,
+    normName, clientsIndex, searchClients, parseVCards, priceList,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

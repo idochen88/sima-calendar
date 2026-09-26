@@ -340,3 +340,20 @@ test('סיכום: הסכום אחרי הנחה וסך ההנחות', () => {
   assert.equal(s.discountTotal, 40);
   assert.equal(s.byPayment.bit, 260);
 });
+
+test('מחירון מתוך ההגדרות', () => {
+  const sections = L.priceList({
+    treatmentTypes: [
+      { id: 't-face', name: 'טיפול פנים', price: 250, color: '#E5879F', subs: [] },
+      { id: 't-hair', name: 'הסרת שיער', price: 150, color: '#9C8CDB', subs: [
+        { id: 's1', name: 'רגליים', price: 200 }, { id: 's2', name: ' ', price: '90' }] },
+    ],
+    products: [{ id: 'p1', name: 'קרם לחות', price: 120 }],
+  });
+  assert.equal(sections.length, 3);
+  assert.deepEqual(sections[0], { id: 't-face', name: 'טיפול פנים', color: '#E5879F', price: 250, rows: [] });
+  assert.equal(sections[1].price, null);
+  assert.deepEqual(sections[1].rows, [{ name: 'רגליים', price: 200 }, { name: 'ללא שם', price: 90 }]);
+  assert.equal(sections[2].products, true);
+  assert.deepEqual(L.priceList({ treatmentTypes: [], products: [] }), []);
+});

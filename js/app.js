@@ -37,6 +37,8 @@
       alert: s('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'),
       edit: s('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/>'),
       move: s('<rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M9 15h6M13 13l2 2-2 2"/>'),
+      tag: s('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'),
+      share: s('<path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>'),
       bag: s('<path d="M5 8h14l-1 13H6L5 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>'),
     };
   })();
@@ -687,6 +689,177 @@
           </button>`).join('')}
         </section>`}
       </div>`);
+  }
+
+  /* ---------- מחירון ---------- */
+  function priceRowsHTML(sec) {
+    return sec.rows.map((r) => `<div class="price-row"><span>${esc(r.name)}</span><b>${money(r.price)}</b></div>`).join('');
+  }
+
+  function viewPrices() {
+    const sections = L.priceList(state.settings);
+    return `
+      <div class="vhead"><div class="vhead-title"><h1>מחירון</h1><p class="sub">המחירים מההגדרות, מוכן לשליחה ללקוחות</p></div></div>
+      ${sections.length ? `<button class="btn" data-action="share-prices" style="margin-bottom:14px">${I.share}שליחת המחירון</button>` : ''}
+      ${sections.map((sec) => `
+        <section class="card price-card" style="--tc:${sec.color || NEUTRAL}">
+          <div class="price-head">
+            ${sec.products ? `<span class="price-ico">${I.bag}</span>` : '<i class="dot big"></i>'}
+            <h2>${esc(sec.name)}</h2>
+            ${sec.price != null ? `<b>${money(sec.price)}</b>` : ''}
+          </div>
+          ${sec.rows.length ? `<div class="price-rows">${priceRowsHTML(sec)}</div>` : ''}
+        </section>`).join('') || '<div class="card empty">עוד אין טיפולים עם מחירים</div>'}
+      <button class="btn secondary" data-action="open-settings" style="margin-top:4px">${I.edit}עריכת מחירים בהגדרות</button>`;
+  }
+
+  // ציור המחירון כתמונה. highlight = מזהי הטיפולים שיודגשו במסגרת בצבע שלהם
+  function drawPriceList(highlight) {
+    const sections = L.priceList(state.settings);
+    const W = 1080; const P = 56; const PAD = 36;
+    const HEAD_H = 250; const ROW_H = 66; const GAP = 26;
+    const FONT = '-apple-system, BlinkMacSystemFont, "SF Hebrew", "Segoe UI", "Arial Hebrew", Arial, sans-serif';
+    const blockH = (sec) => PAD + 60 + (sec.rows.length ? 14 + sec.rows.length * ROW_H : 0) + PAD - 8;
+    const H = HEAD_H + 40 + sections.reduce((sum, sec) => sum + blockH(sec) + GAP, 0) + 60;
+
+    const c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    const ctx = c.getContext('2d');
+    const css = getComputedStyle(document.documentElement);
+    const v = (n) => css.getPropertyValue(n).trim();
+    const rgba = (hex, a) => {
+      const h = hex.replace('#', '');
+      const n = parseInt(h.length === 3 ? h.replace(/./g, '$&$&') : h, 16);
+      return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+    };
+    const rrect = (x, y, w, h, r) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+    };
+    // טקסט עברי מימין, מקטין את הגופן אם השם ארוך מדי
+    const text = (str, x, y, size, weight, color, align, maxW) => {
+      let fs = size;
+      do { ctx.font = `${weight} ${fs}px ${FONT}`; fs -= 2; } while (maxW && ctx.measureText(str).width > maxW && fs > 18);
+      ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+      ctx.fillText(str, x, y);
+    };
+    const price = (n, x, y, size, color) => {
+      ctx.save(); ctx.direction = 'ltr';
+      text(money(n), x, y, size, 700, color, 'left');
+      ctx.restore();
+    };
+
+    ctx.direction = 'rtl';
+    ctx.fillStyle = v('--bg') || '#FAF4F0';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = v('--rose-soft') || '#F7E1E6';
+    ctx.fillRect(0, 0, W, HEAD_H);
+    text('מחירון', W / 2, 105, 84, 800, v('--rose-dark'), 'center');
+    text(state.settings.businessName || '', W / 2, 185, 38, 500, v('--text'), 'center', W - 2 * P);
+
+    let y = HEAD_H + 40;
+    const R = W - P - PAD; // קצה ימני של הטקסט
+    const Lx = P + PAD;    // קצה שמאלי (מחירים)
+    for (const sec of sections) {
+      const h = blockH(sec);
+      const color = sec.color || NEUTRAL;
+      const on = highlight.has(sec.id);
+      rrect(P, y, W - 2 * P, h, 28);
+      ctx.fillStyle = on ? rgba(color, 0.16) : '#FFFFFF';
+      ctx.fill();
+      ctx.lineWidth = on ? 9 : 2;
+      ctx.strokeStyle = on ? color : v('--line');
+      ctx.stroke();
+
+      const hy = y + PAD + 28;
+      ctx.beginPath(); ctx.arc(R - 14, hy, 14, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+      text(sec.name, R - 44, hy, 46, 800, v('--text'), 'right', W - 2 * P - 2 * PAD - 260);
+      if (sec.price != null) price(sec.price, Lx, hy, 46, v('--rose-dark'));
+
+      let ry = y + PAD + 60 + 14;
+      sec.rows.forEach((r, i) => {
+        if (i) { ctx.fillStyle = on ? rgba(color, 0.35) : v('--line'); ctx.fillRect(Lx, ry, R - Lx, 2); }
+        text(r.name, R - 44, ry + ROW_H / 2, 38, 500, v('--text'), 'right', W - 2 * P - 2 * PAD - 260);
+        price(r.price, Lx, ry + ROW_H / 2, 38, v('--rose-dark'));
+        ry += ROW_H;
+      });
+      y += h + GAP;
+    }
+    return c;
+  }
+
+  const priceShare = { mode: 'all', ids: new Set() };
+
+  function updatePricePreview() {
+    const hl = priceShare.mode === 'highlight' ? priceShare.ids : new Set();
+    $('#pricePreview').src = drawPriceList(hl).toDataURL('image/png');
+    $$('#priceMode button').forEach((b) => {
+      const on = b.dataset.mode === priceShare.mode;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on);
+    });
+    $('#hlPanel').hidden = priceShare.mode !== 'highlight';
+    $$('#hlChips [data-id]').forEach((b) => {
+      const on = priceShare.ids.has(b.dataset.id);
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on);
+    });
+  }
+
+  function openPriceShare() {
+    priceShare.mode = 'all';
+    priceShare.ids = new Set();
+    const types = L.priceList(state.settings).filter((x) => !x.products);
+    openSheet(`
+      <div class="sheet-head">
+        <button class="btn ghost" data-action="close-sheet">ביטול</button>
+        <h2>שליחת המחירון</h2>
+        <span style="width:80px"></span>
+      </div>
+      <div class="sheet-body">
+        <div class="price-mode" id="priceMode">
+          <button type="button" data-action="price-mode" data-mode="all"><b>כל המחירון</b><small>כמו שהוא</small></button>
+          <button type="button" data-action="price-mode" data-mode="highlight"><b>עם הדגשה</b><small>מסגרת בצבע סביב טיפול</small></button>
+        </div>
+        <div id="hlPanel" class="field" hidden>
+          <span class="field-label">מה להדגיש? <small>(אפשר כמה)</small></span>
+          <div class="chips" id="hlChips">
+            ${types.map((t) => `<button type="button" class="chip tchip" style="--tc:${t.color || NEUTRAL}" data-action="price-hl" data-id="${esc(t.id)}"><i class="dot"></i>${esc(t.name)}</button>`).join('')}
+          </div>
+        </div>
+        <img id="pricePreview" class="price-preview" alt="תצוגה מקדימה של המחירון">
+        <button class="btn wa" data-action="send-prices">${I.share}שליחה</button>
+        <p class="settings-note" style="text-align:center;margin-top:8px">נפתח חלון שיתוף: בוחרים וואטסאפ ואת הלקוחה</p>
+      </div>`);
+    updatePricePreview();
+  }
+
+  async function sendPrices() {
+    if (priceShare.mode === 'highlight' && !priceShare.ids.size) {
+      toast('בחרי איזה טיפול להדגיש');
+      return;
+    }
+    const hl = priceShare.mode === 'highlight' ? priceShare.ids : new Set();
+    const blob = await new Promise((res) => drawPriceList(hl).toBlob(res, 'image/png'));
+    const file = new File([blob], 'pricelist.png', { type: 'image/png' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'מחירון.png';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        toast('התמונה נשמרה');
+      }
+    } catch (e) {
+      if (e && e.name !== 'AbortError') toast('השליחה לא הצליחה, נסי שוב');
+    }
   }
 
   /* ---------- מסך הגדרות ---------- */
@@ -1584,10 +1757,10 @@
     window.scrollTo(0, 0);
   }
 
-  const TAB_OF = { calendar: 'calendar', day: 'calendar', reminders: 'reminders', summary: 'summary', clients: 'clients', settings: 'calendar' };
+  const TAB_OF = { calendar: 'calendar', day: 'calendar', reminders: 'reminders', summary: 'summary', clients: 'clients', prices: 'prices', settings: 'calendar' };
 
   function render() {
-    const views = { calendar: viewCalendar, day: viewDay, reminders: viewReminders, summary: viewSummary, clients: viewClients, settings: viewSettings };
+    const views = { calendar: viewCalendar, day: viewDay, reminders: viewReminders, summary: viewSummary, clients: viewClients, prices: viewPrices, settings: viewSettings };
     $('#view').innerHTML = views[state.view]();
     const tab = TAB_OF[state.view];
     $$('.tab').forEach((t) => {
@@ -1702,6 +1875,14 @@
       if (t === 'calendar') state.month = state.view === 'calendar' ? L.monthStart(today()) : state.month;
       go(t);
     },
+    'share-prices': () => openPriceShare(),
+    'price-mode': (el) => { priceShare.mode = el.dataset.mode; updatePricePreview(); },
+    'price-hl': (el) => {
+      const id = el.dataset.id;
+      if (priceShare.ids.has(id)) priceShare.ids.delete(id); else priceShare.ids.add(id);
+      updatePricePreview();
+    },
+    'send-prices': () => sendPrices(),
     'open-settings': () => { state.settingsBack = state.view; go('settings'); },
     'back-settings': () => go(state.settingsBack && state.settingsBack !== 'settings' ? state.settingsBack : 'calendar'),
     'month-prev': () => shiftMonth(-1),

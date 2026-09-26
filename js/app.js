@@ -354,7 +354,7 @@
             <div class="appt-meta">
               ${pay ? `<span class="tag">${esc(pay)}</span>` : '<span class="tag">אמצעי תשלום לא צוין</span>'}
               ${sent}
-              ${L.apptDiscount(a) ? `<span class="tag">הנחה ${a.discount.type === 'percent' ? L.cleanDiscount(a.discount).value + '%' : money(L.apptDiscount(a))}</span>` : ''}
+              ${L.apptDiscount(a) ? `<span class="tag">הנחה ${money(L.apptDiscount(a))} (${Math.round((L.apptDiscount(a) / L.apptSubtotal(a)) * 1000) / 10}%)</span>` : ''}
               ${overlapIds.has(a.id) ? `<span class="tag warn">${I.alert}חפיפה</span>` : ''}
             </div>
             ${a.notes ? `<div class="appt-note">${esc(a.notes)}</div>` : ''}
@@ -957,13 +957,9 @@
         <div class="field discount-box">
           <span class="field-label">הנחה <small>(לא חובה)</small></span>
           <div class="discount-row">
-            <input id="fDiscount" type="number" inputmode="decimal" min="0" class="ltr" value="${f.discount ? esc(f.discount.value) : ''}" placeholder="0" aria-label="סכום ההנחה">
-            <div class="disc-seg" id="fDiscType" role="group" aria-label="סוג ההנחה">
-              ${[['amount', '₪'], ['percent', '%']].map(([id, lbl]) => {
-                const on = (f.discount ? f.discount.type : 'amount') === id;
-                return `<button type="button" class="${on ? 'on' : ''}" data-action="f-disc-type" data-type="${id}" aria-pressed="${on}" aria-label="${id === 'percent' ? 'באחוזים' : 'בשקלים'}">${lbl}</button>`;
-              }).join('')}
-            </div>
+            <label class="disc-input"><input id="fDiscAmt" type="number" inputmode="decimal" min="0" class="ltr" placeholder="0" aria-label="הנחה בשקלים"><span>₪</span></label>
+            <span class="disc-eq">=</span>
+            <label class="disc-input"><input id="fDiscPct" type="number" inputmode="decimal" min="0" max="100" class="ltr" placeholder="0" aria-label="הנחה באחוזים"><span>%</span></label>
           </div>
         </div>
 
@@ -1086,11 +1082,34 @@
     const subEl = $('#fSubtotal');
     subEl.hidden = !disc;
     subEl.textContent = disc ? `${money(L.apptSubtotal(form))} פחות הנחה ${money(disc)}` : '';
+    syncDiscountInputs();
     const end = form.time && form.duration ? L.apptEnd(form) : '—';
     $('#fEnd').textContent = end;
     const overlaps = L.findOverlaps(state.appts, { ...form, id: form.id || '__new__' });
     $('#overlapWarn').innerHTML = overlaps.length
       ? `<div class="warn-box">⚠️ חפיפה עם ${overlaps.map((o) => `${esc(o.clientName)} (${esc(o.time)}–${L.apptEnd(o)})`).join(', ')}</div>` : '';
+  }
+
+  // שני השדות מעדכנים זה את זה: השדה שהוקלד נשאר כמו שהוא, השני מחושב ממנו
+  function syncDiscountInputs() {
+    const d = form.discount;
+    const amtEl = $('#fDiscAmt');
+    const pctEl = $('#fDiscPct');
+    if (!d) {
+      if (document.activeElement !== amtEl) amtEl.value = '';
+      if (document.activeElement !== pctEl) pctEl.value = '';
+      return;
+    }
+    const sub = L.apptSubtotal(form);
+    const amt = L.apptDiscount(form);
+    const pct = sub ? Math.round((amt / sub) * 1000) / 10 : '';
+    if (d.type === 'percent') {
+      if (document.activeElement !== pctEl) pctEl.value = d.value;
+      amtEl.value = sub ? amt : '';
+    } else {
+      if (document.activeElement !== amtEl) amtEl.value = d.value;
+      pctEl.value = pct;
+    }
   }
 
   // לקוחות קיימות קודם, אחריהן אנשי קשר מהטלפון שעוד לא היו לקוחות
@@ -1164,11 +1183,11 @@
       form.reminderSent = e.target.checked;
       form.reminderSentAt = e.target.checked ? (form.reminderSentAt || Date.now()) : null;
     });
-    $('#fDiscount').addEventListener('input', (e) => {
-      const type = form.discountType || (form.discount ? form.discount.type : 'amount');
-      form.discount = e.target.value === '' ? null : { type, value: Number(e.target.value) };
-      form.discountType = type;
-      updateFormTotals();
+    [['#fDiscAmt', 'amount'], ['#fDiscPct', 'percent']].forEach(([sel, type]) => {
+      $(sel).addEventListener('input', (e) => {
+        form.discount = e.target.value === '' ? null : { type, value: Number(e.target.value) };
+        updateFormTotals();
+      });
     });
     $('#items').addEventListener('input', (e) => {
       const idx = e.target.dataset.item;
@@ -1759,17 +1778,6 @@
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', on);
       });
-    },
-    'f-disc-type': (el) => {
-      const type = el.dataset.type;
-      form.discountType = type;
-      if (form.discount) form.discount = { ...form.discount, type };
-      $$('#fDiscType button').forEach((b) => {
-        const on = b.dataset.type === type;
-        b.classList.toggle('on', on);
-        b.setAttribute('aria-pressed', on);
-      });
-      updateFormTotals();
     },
     'f-status': (el) => {
       form.status = el.dataset.status;

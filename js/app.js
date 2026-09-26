@@ -713,14 +713,37 @@
       <button class="btn secondary" data-action="open-settings" style="margin-top:4px">${I.edit}עריכת מחירים בהגדרות</button>`;
   }
 
-  // ציור המחירון כתמונה. highlight = מזהי הטיפולים שיודגשו במסגרת בצבע שלהם
+  // ציור המחירון כתמונה לשליחה ללקוחות (בלי תכשירים), תמיד בעמוד אחד בגודל מסך טלפון:
+  // אם אין מקום בעמודה אחת עוברים לשתי עמודות, ואם צריך מקטינים את הכתב.
+  // highlight = מזהי הטיפולים שיודגשו במסגרת בצבע שלהם
   function drawPriceList(highlight) {
-    const sections = L.priceList(state.settings);
-    const W = 1080; const P = 56; const PAD = 36;
-    const HEAD_H = 250; const ROW_H = 66; const GAP = 26;
+    const sections = L.priceList(state.settings).filter((x) => !x.products);
+    const W = 1080; const MAX_H = 1920; const M = 40; const HEAD_H = 200; const COL_GAP = 22; const BLOCK_GAP = 18;
     const FONT = '-apple-system, BlinkMacSystemFont, "SF Hebrew", "Segoe UI", "Arial Hebrew", Arial, sans-serif';
-    const blockH = (sec) => PAD + 60 + (sec.rows.length ? 14 + sec.rows.length * ROW_H : 0) + PAD - 8;
-    const H = HEAD_H + 40 + sections.reduce((sum, sec) => sum + blockH(sec) + GAP, 0) + 60;
+    // מידות בסיס (k = 1); הכול מוכפל בגורם ההקטנה
+    const B = { pad: 22, head: 48, headFont: 38, gap: 6, row: 48, rowFont: 31 };
+    const blockH = (sec, k) => k * (2 * B.pad + B.head + (sec.rows.length ? B.gap + sec.rows.length * B.row : 0));
+    const avail = MAX_H - HEAD_H - 2 * M;
+
+    // חלוקה לעמודות: כל טיפול נכנס לעמודה הכי קצרה כרגע
+    const layout = (n, k) => {
+      const cols = Array.from({ length: n }, () => ({ list: [], h: 0 }));
+      sections.forEach((sec) => {
+        const c = cols.reduce((m, x) => (x.h < m.h ? x : m), cols[0]);
+        c.list.push(sec);
+        c.h += blockH(sec, k) + BLOCK_GAP;
+      });
+      return cols;
+    };
+    const fit = (n) => {
+      const hAt1 = Math.max(...layout(n, 1).map((c) => c.h), 1);
+      return Math.min(n === 1 ? 1.15 : 1, avail / hAt1);
+    };
+    let nCols = 1; let k = fit(1);
+    if (k < 0.9 && sections.length > 1) { nCols = 2; k = fit(2); }
+    const cols = layout(nCols, k);
+    const contentH = Math.max(...cols.map((c) => c.h), 0);
+    const H = Math.min(MAX_H, Math.ceil(HEAD_H + contentH + 2 * M));
 
     const c = document.createElement('canvas');
     c.width = W; c.height = H;
@@ -737,13 +760,14 @@
       ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
       ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
     };
-    // טקסט עברי מימין, מקטין את הגופן אם השם ארוך מדי
+    // טקסט עברי; מקטין את הגופן אם הטקסט ארוך מדי
     const text = (str, x, y, size, weight, color, align, maxW) => {
       let fs = size;
-      do { ctx.font = `${weight} ${fs}px ${FONT}`; fs -= 2; } while (maxW && ctx.measureText(str).width > maxW && fs > 18);
+      do { ctx.font = `${weight} ${fs}px ${FONT}`; fs -= 1; } while (maxW && ctx.measureText(str).width > maxW && fs > 14);
       ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
       ctx.fillText(str, x, y);
     };
+    const priceW = (n, size) => { ctx.font = `700 ${size}px ${FONT}`; return ctx.measureText(money(n)).width; };
     const price = (n, x, y, size, color) => {
       ctx.save(); ctx.direction = 'ltr';
       text(money(n), x, y, size, 700, color, 'left');
@@ -755,37 +779,48 @@
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = v('--rose-soft') || '#F7E1E6';
     ctx.fillRect(0, 0, W, HEAD_H);
-    text('מחירון', W / 2, 105, 84, 800, v('--rose-dark'), 'center');
-    text(state.settings.businessName || '', W / 2, 185, 38, 500, v('--text'), 'center', W - 2 * P);
+    text('מחירון', W / 2, 88, 76, 800, v('--rose-dark'), 'center');
+    text(state.settings.businessName || '', W / 2, 158, 34, 500, v('--text'), 'center', W - 2 * M);
 
-    let y = HEAD_H + 40;
-    const R = W - P - PAD; // קצה ימני של הטקסט
-    const Lx = P + PAD;    // קצה שמאלי (מחירים)
-    for (const sec of sections) {
-      const h = blockH(sec);
-      const color = sec.color || NEUTRAL;
-      const on = highlight.has(sec.id);
-      rrect(P, y, W - 2 * P, h, 28);
-      ctx.fillStyle = on ? rgba(color, 0.16) : '#FFFFFF';
-      ctx.fill();
-      ctx.lineWidth = on ? 9 : 2;
-      ctx.strokeStyle = on ? color : v('--line');
-      ctx.stroke();
+    const colW = (W - 2 * M - (nCols - 1) * COL_GAP) / nCols;
+    const pad = B.pad * k; const headFont = B.headFont * k; const rowFont = B.rowFont * k;
+    cols.forEach((col, ci) => {
+      const right = W - M - ci * (colW + COL_GAP); // עמודה ראשונה מימין
+      const left = right - colW;
+      let y = HEAD_H + M;
+      for (const sec of col.list) {
+        const h = blockH(sec, k);
+        const color = sec.color || NEUTRAL;
+        const on = highlight.has(sec.id);
+        rrect(left, y, colW, h, 22 * k);
+        ctx.fillStyle = on ? rgba(color, 0.16) : '#FFFFFF';
+        ctx.fill();
+        ctx.lineWidth = on ? 8 : 2;
+        ctx.strokeStyle = on ? color : v('--line');
+        ctx.stroke();
 
-      const hy = y + PAD + 28;
-      ctx.beginPath(); ctx.arc(R - 14, hy, 14, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
-      text(sec.name, R - 44, hy, 46, 800, v('--text'), 'right', W - 2 * P - 2 * PAD - 260);
-      if (sec.price != null) price(sec.price, Lx, hy, 46, v('--rose-dark'));
+        const R = right - pad; const Lx = left + pad;
+        const hy = y + pad + (B.head * k) / 2;
+        const dot = 11 * k;
+        ctx.beginPath(); ctx.arc(R - dot, hy, dot, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+        const nameR = R - dot * 2 - 12 * k;
+        const hp = sec.price != null ? priceW(sec.price, headFont) + 16 * k : 0;
+        text(sec.name, nameR, hy, headFont, 800, v('--text'), 'right', nameR - Lx - hp);
+        if (sec.price != null) price(sec.price, Lx, hy, headFont, v('--rose-dark'));
 
-      let ry = y + PAD + 60 + 14;
-      sec.rows.forEach((r, i) => {
-        if (i) { ctx.fillStyle = on ? rgba(color, 0.35) : v('--line'); ctx.fillRect(Lx, ry, R - Lx, 2); }
-        text(r.name, R - 44, ry + ROW_H / 2, 38, 500, v('--text'), 'right', W - 2 * P - 2 * PAD - 260);
-        price(r.price, Lx, ry + ROW_H / 2, 38, v('--rose-dark'));
-        ry += ROW_H;
-      });
-      y += h + GAP;
-    }
+        let ry = y + pad + (B.head + B.gap) * k;
+        const rowH = B.row * k;
+        sec.rows.forEach((r) => {
+          ctx.fillStyle = on ? rgba(color, 0.35) : v('--line');
+          ctx.fillRect(Lx, ry, R - Lx, Math.max(1, 2 * k));
+          const rp = priceW(r.price, rowFont) + 14 * k;
+          text(r.name, nameR, ry + rowH / 2, rowFont, 500, v('--text'), 'right', nameR - Lx - rp);
+          price(r.price, Lx, ry + rowH / 2, rowFont, v('--rose-dark'));
+          ry += rowH;
+        });
+        y += h + BLOCK_GAP;
+      }
+    });
     return c;
   }
 
@@ -830,7 +865,7 @@
         </div>
         <img id="pricePreview" class="price-preview" alt="תצוגה מקדימה של המחירון">
         <button class="btn wa" data-action="send-prices">${I.share}שליחה</button>
-        <p class="settings-note" style="text-align:center;margin-top:8px">נפתח חלון שיתוף: בוחרים וואטסאפ ואת הלקוחה</p>
+        <p class="settings-note" style="text-align:center;margin-top:8px">נפתח חלון שיתוף: בוחרים וואטסאפ ואת הלקוחה. תכשירים לא נשלחים.</p>
       </div>`);
     updatePricePreview();
   }

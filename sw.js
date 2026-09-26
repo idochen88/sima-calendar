@@ -1,5 +1,5 @@
 // מטמון לעבודה אופליין. בכל עדכון של קבצי האפליקציה — להעלות את מספר הגרסה.
-const CACHE = 'sima-calendar-v6';
+const CACHE = 'sima-calendar-v7';
 const ASSETS = [
   './',
   './index.html',

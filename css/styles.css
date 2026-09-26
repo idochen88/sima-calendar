@@ -586,7 +586,19 @@ svg { display: block; }
   display: flex; justify-content: space-between; align-items: center;
   background: var(--rose-soft); border-radius: 16px; padding: 12px 16px; margin-bottom: 16px;
 }
-.total-box span { font-weight: 700; color: var(--rose-dark); }
+.total-box span { font-weight: 700; color: var(--rose-dark); display: flex; flex-direction: column; }
+.total-box span small { font-weight: 500; font-size: 13px; opacity: .85; }
+
+.discount-box { margin-bottom: 10px; }
+.discount-box .field-label { display: block; margin-bottom: 6px; }
+.discount-row { display: flex; gap: 8px; align-items: stretch; }
+.discount-row input { flex: 1; min-width: 0; }
+.disc-seg { display: flex; gap: 6px; }
+.disc-seg button {
+  min-width: 52px; border-radius: 14px; font-weight: 700; font-size: 18px;
+  border: 1.5px solid var(--beige-2); background: var(--surface);
+}
+.disc-seg button.on { border-color: var(--rose); background: var(--rose-soft); color: var(--rose-dark); box-shadow: inset 0 0 0 1px var(--rose); }
 .total-box b { font-size: 26px; color: var(--rose-dark); direction: ltr; }
 
 .pay-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

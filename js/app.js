@@ -354,6 +354,7 @@
             <div class="appt-meta">
               ${pay ? `<span class="tag">${esc(pay)}</span>` : '<span class="tag">אמצעי תשלום לא צוין</span>'}
               ${sent}
+              ${L.apptDiscount(a) ? `<span class="tag">הנחה ${a.discount.type === 'percent' ? L.cleanDiscount(a.discount).value + '%' : money(L.apptDiscount(a))}</span>` : ''}
               ${overlapIds.has(a.id) ? `<span class="tag warn">${I.alert}חפיפה</span>` : ''}
             </div>
             ${a.notes ? `<div class="appt-note">${esc(a.notes)}</div>` : ''}
@@ -415,6 +416,7 @@
         <div class="hero-amt">${money(s.total)}</div>
         <div class="hero-meta">
           <span>${s.count} טיפולים</span>
+          ${s.discountTotal ? `<span>הנחות ${money(s.discountTotal)}</span>` : ''}
           ${s.cancelledCount ? `<span>${s.cancelledCount} ביטלו (לא נספרו)</span>` : ''}
         </div>
         ${payTiles(s)}
@@ -526,6 +528,7 @@
         <span>${s.count} טיפולים</span>
         ${s.count ? `<span>ממוצע ${money(Math.round(avg))} לטיפול</span>` : ''}
         ${s.productsTotal ? `<span>מתוכם תכשירים ${money(s.productsTotal)}</span>` : ''}
+        ${s.discountTotal ? `<span>הנחות ${money(s.discountTotal)}</span>` : ''}
         ${s.cancelledCount ? `<span>${s.cancelledCount} ביטלו (לא נספרו)</span>` : ''}
       </div>
     </section>`;
@@ -889,12 +892,14 @@
       reminderSent: false,
       reminderSentAt: null,
       notes: '',
+      discount: null,
     };
   }
 
   function formFromAppt(a) {
     return {
       ...JSON.parse(JSON.stringify(a)),
+      discount: L.cleanDiscount(a.discount),
       duration: L.apptDuration(a),
       durationTouched: true,
     };
@@ -949,7 +954,23 @@
         </div>
         <div id="overlapWarn"></div>
 
-        <div class="total-box"><span>סה״כ לתשלום</span><b id="fTotal">₪0</b></div>
+        <div class="field discount-box">
+          <span class="field-label">הנחה <small>(לא חובה)</small></span>
+          <div class="discount-row">
+            <input id="fDiscount" type="number" inputmode="decimal" min="0" class="ltr" value="${f.discount ? esc(f.discount.value) : ''}" placeholder="0" aria-label="סכום ההנחה">
+            <div class="disc-seg" id="fDiscType" role="group" aria-label="סוג ההנחה">
+              ${[['amount', '₪'], ['percent', '%']].map(([id, lbl]) => {
+                const on = (f.discount ? f.discount.type : 'amount') === id;
+                return `<button type="button" class="${on ? 'on' : ''}" data-action="f-disc-type" data-type="${id}" aria-pressed="${on}" aria-label="${id === 'percent' ? 'באחוזים' : 'בשקלים'}">${lbl}</button>`;
+              }).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div class="total-box">
+          <span>סה״כ לתשלום<small id="fSubtotal" hidden></small></span>
+          <b id="fTotal">₪0</b>
+        </div>
 
         <div class="field">
           <span class="field-label">אמצעי תשלום</span>
@@ -1061,6 +1082,10 @@
 
   function updateFormTotals() {
     $('#fTotal').textContent = money(L.apptTotal(form));
+    const disc = L.apptDiscount(form);
+    const subEl = $('#fSubtotal');
+    subEl.hidden = !disc;
+    subEl.textContent = disc ? `${money(L.apptSubtotal(form))} פחות הנחה ${money(disc)}` : '';
     const end = form.time && form.duration ? L.apptEnd(form) : '—';
     $('#fEnd').textContent = end;
     const overlaps = L.findOverlaps(state.appts, { ...form, id: form.id || '__new__' });
@@ -1138,6 +1163,12 @@
     $('#fSent').addEventListener('change', (e) => {
       form.reminderSent = e.target.checked;
       form.reminderSentAt = e.target.checked ? (form.reminderSentAt || Date.now()) : null;
+    });
+    $('#fDiscount').addEventListener('input', (e) => {
+      const type = form.discountType || (form.discount ? form.discount.type : 'amount');
+      form.discount = e.target.value === '' ? null : { type, value: Number(e.target.value) };
+      form.discountType = type;
+      updateFormTotals();
     });
     $('#items').addEventListener('input', (e) => {
       const idx = e.target.dataset.item;
@@ -1239,6 +1270,7 @@
       date: form.date,
       time: form.time,
       items: form.items.map(cleanItem),
+      discount: L.cleanDiscount(form.discount),
       duration: form.duration || L.DEFAULT_DURATION,
       payment: form.payment || '',
       status: form.status || 'pending',
@@ -1440,6 +1472,7 @@
       date: a.date,
       time: /^\d{2}:\d{2}$/.test(a.time) ? a.time : '09:00',
       items: Array.isArray(a.items) ? a.items.filter(Boolean).map(cleanItem) : [],
+      discount: L.cleanDiscount(a.discount),
       duration: Number(a.duration) || L.DEFAULT_DURATION,
       payment: L.ALL_PAYMENTS.some((p) => p.id === a.payment) ? a.payment : '',
       status: statuses.has(a.status) ? a.status : 'pending',
@@ -1726,6 +1759,17 @@
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', on);
       });
+    },
+    'f-disc-type': (el) => {
+      const type = el.dataset.type;
+      form.discountType = type;
+      if (form.discount) form.discount = { ...form.discount, type };
+      $$('#fDiscType button').forEach((b) => {
+        const on = b.dataset.type === type;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on);
+      });
+      updateFormTotals();
     },
     'f-status': (el) => {
       form.status = el.dataset.status;

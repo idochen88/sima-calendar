@@ -312,3 +312,31 @@ test('קובץ ליומן האייפון: שעה מקומית, התראה ושו
   assert.ok(unfolded.includes(String.raw`עור רגיש\, להיזהר\; תודה`));
   assert.ok(!L.buildICS([a], { alarmMinutes: 0 }).includes('VALARM'));
 });
+
+test('הנחה בשקלים ובאחוזים', () => {
+  const base = appt('2026-09-13', '09:00', [['טיפול פנים', 250], ['עיצוב גבות', 50]], 'bit', 'confirmed');
+  assert.equal(L.apptTotal(base), 300);
+  assert.equal(L.apptTotal({ ...base, discount: { type: 'amount', value: 30 } }), 270);
+  assert.equal(L.apptTotal({ ...base, discount: { type: 'percent', value: 10 } }), 270);
+  assert.equal(L.apptDiscount({ ...base, discount: { type: 'percent', value: 15 } }), 45);
+  // לא יורדים מתחת לאפס
+  assert.equal(L.apptTotal({ ...base, discount: { type: 'amount', value: 500 } }), 0);
+  assert.equal(L.apptTotal({ ...base, discount: { type: 'percent', value: 150 } }), 0);
+  // הנחה ריקה / שלילית = בלי הנחה
+  assert.equal(L.cleanDiscount({ type: 'amount', value: 0 }), null);
+  assert.equal(L.cleanDiscount({ type: 'percent', value: -5 }), null);
+  assert.equal(L.cleanDiscount(null), null);
+  assert.equal(L.apptSubtotal({ ...base, discount: { type: 'amount', value: 30 } }), 300);
+});
+
+test('סיכום: הסכום אחרי הנחה וסך ההנחות', () => {
+  const list = [
+    appt('2026-09-13', '09:00', [['טיפול פנים', 200]], 'bit', 'confirmed', { discount: { type: 'percent', value: 10 } }),
+    appt('2026-09-13', '11:00', [['עיצוב גבות', 100]], 'bit', 'confirmed', { discount: { type: 'amount', value: 20 } }),
+    appt('2026-09-13', '12:00', [['עיצוב גבות', 100]], 'bit', 'cancelled', { discount: { type: 'amount', value: 20 } }),
+  ];
+  const s = L.daySummary(list, '2026-09-13');
+  assert.equal(s.total, 180 + 80);
+  assert.equal(s.discountTotal, 40);
+  assert.equal(s.byPayment.bit, 260);
+});

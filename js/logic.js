@@ -189,8 +189,29 @@
     return i.sub ? `${i.name} – ${i.sub}` : (i.name || '');
   }
 
-  function apptTotal(a) {
+  function apptSubtotal(a) {
     return round2((a.items || []).reduce((s, i) => s + itemTotal(i), 0));
+  }
+
+  // הנחה: { type: 'amount' (₪) | 'percent' (%), value }. בלי הנחה: null
+  function cleanDiscount(d) {
+    if (!d) return null;
+    const type = d.type === 'percent' ? 'percent' : 'amount';
+    const value = Math.max(0, num(d.value));
+    if (!value) return null;
+    return { type, value: type === 'percent' ? Math.min(value, 100) : value };
+  }
+
+  // סכום ההנחה בשקלים, לא יותר מהסכום לפני הנחה
+  function apptDiscount(a) {
+    const d = cleanDiscount(a.discount);
+    if (!d) return 0;
+    const sub = apptSubtotal(a);
+    return round2(Math.min(sub, d.type === 'percent' ? (sub * d.value) / 100 : d.value));
+  }
+
+  function apptTotal(a) {
+    return round2(apptSubtotal(a) - apptDiscount(a));
   }
 
   function isCounted(a) {
@@ -235,6 +256,7 @@
     const typeMap = new Map();
     const productMap = new Map();
     let total = 0;
+    let discountTotal = 0;
     let productsTotal = 0;
     let itemsCount = 0;
     const byTotal = (a, b) => b.total - a.total || b.count - a.count;
@@ -242,6 +264,7 @@
     for (const a of counted) {
       const t = apptTotal(a);
       total += t;
+      discountTotal += apptDiscount(a);
       const key = ALL_PAYMENTS.some((p) => p.id === a.payment) ? a.payment : NO_PAYMENT;
       byPayment[key] = round2(byPayment[key] + t);
       for (const it of a.items || []) {
@@ -278,6 +301,7 @@
       from,
       to,
       total: round2(total),
+      discountTotal: round2(discountTotal),
       productsTotal: round2(productsTotal),
       count: counted.length,
       itemsCount,
@@ -573,7 +597,7 @@
     parseDate, fmtDate, todayStr, addDays, dayOfWeek, daysInMonth, monthStart, monthEnd, addMonths,
     weekStart, weekRange, monthRange, monthWeeks, shortDate, longDate, monthLabel, dayName,
     timeToMin, minToTime, apptDuration, apptEnd,
-    num, round2, formatMoney, apptTotal, isCounted, paymentLabel, statusLabel, treatmentNames,
+    num, round2, formatMoney, apptTotal, apptSubtotal, apptDiscount, cleanDiscount, isCounted, paymentLabel, statusLabel, treatmentNames,
     isProduct, itemQty, itemTotal, itemLabel, productNames, buildICS,
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,

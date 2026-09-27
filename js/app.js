@@ -97,7 +97,7 @@
 
   // מחירון גברים: רק הסרת שיער. מחיר ריק = עוד לא נקבע
   const priceOrNull = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : L.num(v));
-  const isHairType = (t) => t.id === 't-hair' || /שיער/.test(t.name);
+  const isHairType = L.isHairType;
   const hairTypes = () => state.settings.treatmentTypes.filter(isHairType);
   const priceFor = (obj, men) => (men ? obj.menPrice : obj.price);
 
@@ -136,6 +136,7 @@
     sumDate: L.todayStr(),
     clientQuery: '',
     clientFilter: 'all',
+    priceMen: false,
     contacts: [],
   };
 
@@ -704,9 +705,14 @@
   }
 
   function viewPrices() {
-    const sections = L.priceList(state.settings);
+    const men = state.priceMen;
+    const sections = L.priceList(state.settings, men);
     return `
       <div class="vhead"><div class="vhead-title"><h1>מחירון</h1><p class="sub">המחירים מההגדרות, מוכן לשליחה ללקוחות</p></div></div>
+      <div class="seg-tabs gender-seg" style="margin-bottom:14px">
+        <button class="${men ? '' : 'on'}" data-action="price-gender" data-men="" aria-pressed="${!men}">נשים</button>
+        <button class="${men ? 'on' : ''}" data-action="price-gender" data-men="1" aria-pressed="${men}">גברים</button>
+      </div>
       ${sections.length ? `<button class="btn" data-action="share-prices" style="margin-bottom:14px">${I.share}שליחת המחירון</button>` : ''}
       ${sections.map((sec) => `
         <section class="card price-card" style="--tc:${sec.color || NEUTRAL}">
@@ -716,7 +722,7 @@
             ${sec.price != null ? `<b>${money(sec.price)}</b>` : ''}
           </div>
           ${sec.rows.length ? `<div class="price-rows">${priceRowsHTML(sec)}</div>` : ''}
-        </section>`).join('') || '<div class="card empty">עוד אין טיפולים עם מחירים</div>'}
+        </section>`).join('') || `<div class="card empty">${men ? 'עוד אין מחירים לגברים. אפשר להוסיף אותם בהגדרות, בכרטיס "מחירון גברים".' : 'עוד אין טיפולים עם מחירים'}</div>`}
       <button class="btn secondary" data-action="open-settings" style="margin-top:4px">${I.edit}עריכת מחירים בהגדרות</button>`;
   }
 
@@ -724,7 +730,8 @@
   // אם אין מקום בעמודה אחת עוברים לשתי עמודות, ואם צריך מקטינים את הכתב.
   // highlight = מזהי הטיפולים שיודגשו במסגרת בצבע שלהם
   function drawPriceList(highlight) {
-    const sections = L.priceList(state.settings).filter((x) => !x.products);
+    const men = state.priceMen;
+    const sections = L.priceList(state.settings, men).filter((x) => !x.products);
     const W = 1080; const MAX_H = 1920; const M = 40; const HEAD_H = 200; const COL_GAP = 22; const BLOCK_GAP = 18;
     const FONT = '-apple-system, BlinkMacSystemFont, "SF Hebrew", "Segoe UI", "Arial Hebrew", Arial, sans-serif';
     // מידות בסיס (k = 1); הכול מוכפל בגורם ההקטנה
@@ -786,7 +793,7 @@
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = v('--rose-soft') || '#F7E1E6';
     ctx.fillRect(0, 0, W, HEAD_H);
-    text('מחירון', W / 2, 88, 76, 800, v('--rose-dark'), 'center');
+    text(men ? 'מחירון גברים' : 'מחירון', W / 2, 88, 76, 800, v('--rose-dark'), 'center');
     text(state.settings.businessName || '', W / 2, 158, 34, 500, v('--text'), 'center', W - 2 * M);
 
     const colW = (W - 2 * M - (nCols - 1) * COL_GAP) / nCols;
@@ -852,11 +859,11 @@
   function openPriceShare() {
     priceShare.mode = 'all';
     priceShare.ids = new Set();
-    const types = L.priceList(state.settings).filter((x) => !x.products);
+    const types = L.priceList(state.settings, state.priceMen).filter((x) => !x.products);
     openSheet(`
       <div class="sheet-head">
         <button class="btn ghost" data-action="close-sheet">ביטול</button>
-        <h2>שליחת המחירון</h2>
+        <h2>${state.priceMen ? 'שליחת מחירון גברים' : 'שליחת המחירון'}</h2>
         <span style="width:80px"></span>
       </div>
       <div class="sheet-body">
@@ -872,7 +879,7 @@
         </div>
         <img id="pricePreview" class="price-preview" alt="תצוגה מקדימה של המחירון">
         <button class="btn wa" data-action="send-prices">${I.share}שליחה</button>
-        <p class="settings-note" style="text-align:center;margin-top:8px">נפתח חלון שיתוף: בוחרים וואטסאפ ואת הלקוחה. תכשירים לא נשלחים.</p>
+        <p class="settings-note" style="text-align:center;margin-top:8px">נפתח חלון שיתוף: בוחרים וואטסאפ ואת ${state.priceMen ? 'הלקוח' : 'הלקוחה'}. תכשירים לא נשלחים.</p>
       </div>`);
     updatePricePreview();
   }
@@ -892,7 +899,7 @@
         const url = URL.createObjectURL(file);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'מחירון.png';
+        a.download = state.priceMen ? 'מחירון גברים.png' : 'מחירון.png';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1963,6 +1970,7 @@
       go(t);
     },
     'share-prices': () => openPriceShare(),
+    'price-gender': (el) => { state.priceMen = !!el.dataset.men; render(); },
     'price-mode': (el) => { priceShare.mode = el.dataset.mode; updatePricePreview(); },
     'price-hl': (el) => {
       const id = el.dataset.id;

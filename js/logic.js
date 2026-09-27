@@ -246,8 +246,20 @@
   /* ---------- מחירון ---------- */
 
   // המחירון מתוך ההגדרות: סוג בלי תתי-סוגים = שורה אחת עם מחיר, סוג עם תתי-סוגים = רשימה
-  function priceList(settings) {
+  // מחירון גברים: רק הסרת שיער
+  const isHairType = (t) => t.id === 't-hair' || /שיער/.test(String(t.name || ''));
+
+  // men = מחירון גברים: רק הסרת שיער, ורק מה שכבר יש לו מחיר לגברים
+  function priceList(settings, men) {
     const name = (x) => String(x.name || '').trim() || 'ללא שם';
+    const has = (v) => v !== '' && v != null && !Number.isNaN(Number(v));
+    if (men) {
+      return (settings.treatmentTypes || []).filter(isHairType).map((t) => ({
+        id: t.id, name: name(t), color: t.color || '',
+        price: !(t.subs && t.subs.length) && has(t.menPrice) ? num(t.menPrice) : null,
+        rows: (t.subs || []).filter((sb) => has(sb.menPrice)).map((sb) => ({ name: name(sb), price: num(sb.menPrice) })),
+      })).filter((sec) => sec.price != null || sec.rows.length);
+    }
     const sections = (settings.treatmentTypes || []).map((t) => ({
       id: t.id, name: name(t), color: t.color || '',
       price: t.subs && t.subs.length ? null : num(t.price),
@@ -616,7 +628,7 @@
     isProduct, itemQty, itemTotal, itemLabel, productNames, buildICS,
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,
-    normName, clientsIndex, searchClients, parseVCards, priceList,
+    normName, clientsIndex, searchClients, parseVCards, priceList, isHairType,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

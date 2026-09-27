@@ -357,3 +357,21 @@ test('מחירון מתוך ההגדרות', () => {
   assert.equal(sections[2].products, true);
   assert.deepEqual(L.priceList({ treatmentTypes: [], products: [] }), []);
 });
+
+test('מחירון גברים: רק הסרת שיער ורק אזורים עם מחיר', () => {
+  const settings = {
+    treatmentTypes: [
+      { id: 't-face', name: 'טיפול פנים', price: 250, menPrice: 200, subs: [] },
+      { id: 't-hair', name: 'הסרת שיער', price: 150, color: '#9C8CDB', menPrice: 100, subs: [
+        { id: 's1', name: 'גב', price: 0, menPrice: 180 }, { id: 's2', name: 'רגליים', price: 200, menPrice: null }] },
+    ],
+    products: [{ id: 'p1', name: 'קרם', price: 120 }],
+  };
+  assert.deepEqual(L.priceList(settings, true), [
+    { id: 't-hair', name: 'הסרת שיער', color: '#9C8CDB', price: null, rows: [{ name: 'גב', price: 180 }] },
+  ]);
+  settings.treatmentTypes[1].subs = [];
+  assert.equal(L.priceList(settings, true)[0].price, 100);
+  settings.treatmentTypes[1].menPrice = null;
+  assert.deepEqual(L.priceList(settings, true), []);
+});

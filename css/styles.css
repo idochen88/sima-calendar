@@ -572,7 +572,7 @@ svg { display: block; }
   display: flex; align-items: center; gap: 2px;
   background: var(--rose-softer); border-radius: 10px; padding: 0 10px;
 }
-.items .item-row .price-input input, .field .item-row .price-input input {
+.items .item-row .price-input input, .field .item-row .price-input input, .split-row .price-input input {
   width: 74px; height: 44px; min-height: 0; border: 0; border-radius: 0; background: transparent;
   font-size: 18px; font-weight: 700; box-shadow: none;
   text-align: left; direction: ltr; outline: none; padding: 0;
@@ -839,3 +839,18 @@ input[type=number] { -moz-appearance: textfield; }
 .men-name .dot, .men-title .dot { background: var(--tc); width: 8px; height: 8px; flex: none; }
 .men-title { display: flex; align-items: center; gap: 8px; font-weight: 700; margin: 6px 0; }
 .men-block + .men-block { margin-top: 12px; }
+
+/* ---------- פיצול תשלום ---------- */
+.field > label.split-switch { display: flex; margin: 10px 0 0; font-size: inherit; font-weight: inherit; color: inherit; }
+.pay-btn[data-n]:not([data-n=""])::before {
+  content: attr(data-n); width: 22px; height: 22px; border-radius: 50%;
+  background: var(--rose); color: #fff; font-size: 13px; display: inline-flex; align-items: center; justify-content: center;
+}
+.split-box { margin-top: 10px; background: var(--surface); border: 1.5px solid var(--line); border-radius: 14px; padding: 8px 14px; }
+.split-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; }
+.split-row + .split-row { border-top: 1px solid var(--line); }
+.split-name { font-weight: 700; }
+.split-rest { font-size: 18px; color: var(--rose-dark); direction: ltr; padding-inline-end: 12px; }
+.split-rest::after { content: ' (היתרה)'; font-size: 12.5px; color: var(--muted); font-weight: 500; }
+.split-hint { margin: 8px 0; color: var(--muted); font-size: 14px; }
+.split-box .warn-box { margin: 4px 0 8px; }

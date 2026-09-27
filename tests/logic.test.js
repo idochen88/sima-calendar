@@ -375,3 +375,21 @@ test('מחירון גברים: רק הסרת שיער ורק אזורים עם �
   settings.treatmentTypes[1].menPrice = null;
   assert.deepEqual(L.priceList(settings, true), []);
 });
+
+test('פיצול תשלום: האחרון מקבל את היתרה, והסיכום לפי אמצעי תשלום מתחלק', () => {
+  const a = {
+    date: '2026-09-01', status: 'confirmed', items: [{ name: 'טיפול פנים', price: 300 }],
+    payment: 'meshulam', payments: [{ id: 'meshulam', amount: 100 }, { id: 'bit', amount: 999 }],
+  };
+  assert.deepEqual(L.paymentParts(a), [{ id: 'meshulam', amount: 100 }, { id: 'bit', amount: 200 }]);
+  assert.equal(L.paymentText(a), 'משולם ₪100 + ביט ₪200');
+  const s = L.summarize([a, { date: '2026-09-02', status: 'confirmed', items: [{ name: 'גבות', price: 80 }], payment: 'bit' }], '2026-09-01', '2026-09-30');
+  assert.equal(s.byPayment.meshulam, 100);
+  assert.equal(s.byPayment.bit, 280);
+  assert.equal(s.total, 380);
+  // פחות משני אמצעים = אין פיצול
+  assert.deepEqual(L.cleanPayments([{ id: 'bit', amount: 5 }]), []);
+  assert.deepEqual(L.cleanPayments([{ id: 'bit', amount: 5 }, { id: 'bit', amount: 3 }, { id: 'zzz', amount: 1 }]), []);
+  assert.deepEqual(L.paymentParts({ items: [{ price: 50 }], payment: 'bit' }), [{ id: 'bit', amount: 50 }]);
+  assert.equal(L.paymentText({ items: [], payment: '' }), '');
+});

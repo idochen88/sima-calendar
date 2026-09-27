@@ -350,7 +350,7 @@
   }
 
   function apptCard(a, overlapIds) {
-    const pay = a.payment ? L.paymentLabel(a.payment) : '';
+    const pay = L.paymentText(a);
     const sent = a.reminderSent
       ? `<span class="tag sent">${I.check}תזכורת נשלחה</span>`
       : (a.status !== 'cancelled' && a.date > today() ? '<span class="tag notsent">טרם נשלחה תזכורת</span>' : '');
@@ -1132,6 +1132,8 @@
       duration: 0,
       durationTouched: false,
       payment: '',
+      payments: [],
+      split: false,
       status: 'pending',
       reminderSent: false,
       reminderSentAt: null,
@@ -1144,6 +1146,8 @@
     return {
       ...JSON.parse(JSON.stringify(a)),
       discount: L.cleanDiscount(a.discount),
+      payments: L.cleanPayments(a.payments),
+      split: L.cleanPayments(a.payments).length > 0,
       duration: L.apptDuration(a),
       durationTouched: true,
     };
@@ -1223,8 +1227,13 @@
         <div class="field">
           <span class="field-label">אמצעי תשלום</span>
           <div class="pay-grid" id="payGrid">
-            ${L.PAYMENTS.concat(L.LEGACY_PAYMENTS.filter((p) => p.id === f.payment)).map((p) => `<button type="button" class="pay-btn ${f.payment === p.id ? 'on' : ''}" data-action="f-pay" data-pay="${p.id}" aria-pressed="${f.payment === p.id}">${esc(p.label)}</button>`).join('')}
+            ${L.PAYMENTS.concat(L.LEGACY_PAYMENTS.filter((p) => p.id === f.payment || f.payments.some((x) => x.id === p.id))).map((p) => `<button type="button" class="pay-btn" data-action="f-pay" data-pay="${p.id}">${esc(p.label)}</button>`).join('')}
           </div>
+          <label class="switch-row split-switch">
+            <span class="sr-text"><b>פיצול תשלום</b><small>חלק באמצעי אחד וחלק באחר</small></span>
+            <span class="switch"><input id="fSplit" type="checkbox" ${f.split ? 'checked' : ''}><span></span></span>
+          </label>
+          <div id="splitRows"></div>
         </div>
 
         <div class="field">
@@ -1338,11 +1347,49 @@
     subEl.hidden = !disc;
     subEl.textContent = disc ? `${money(L.apptSubtotal(form))} פחות הנחה ${money(disc)}` : '';
     syncDiscountInputs();
+    updateSplitRest();
     const end = form.time && form.duration ? L.apptEnd(form) : '—';
     $('#fEnd').textContent = end;
     const overlaps = L.findOverlaps(state.appts, { ...form, id: form.id || '__new__' });
     $('#overlapWarn').innerHTML = overlaps.length
       ? `<div class="warn-box">⚠️ חפיפה עם ${overlaps.map((o) => `${esc(o.clientName)} (${esc(o.time)}–${L.apptEnd(o)})`).join(', ')}</div>` : '';
+  }
+
+  // אמצעי התשלום שנבחרו: אחד רגיל, או כמה בפיצול תשלום
+  function renderPayment() {
+    const chosen = form.split ? form.payments.map((p) => p.id) : [form.payment];
+    $$('#payGrid .pay-btn').forEach((b) => {
+      const i = chosen.indexOf(b.dataset.pay);
+      b.classList.toggle('on', i >= 0);
+      b.setAttribute('aria-pressed', i >= 0);
+      b.dataset.n = form.split && i >= 0 ? i + 1 : '';
+    });
+    const box = $('#splitRows');
+    if (!form.split) { box.innerHTML = ''; return; }
+    const n = form.payments.length;
+    box.innerHTML = `<div class="split-box">
+      ${n < 2 ? `<p class="split-hint">בחרי ${n ? 'עוד אמצעי תשלום' : 'למעלה את אמצעי התשלום (לפחות שניים)'}</p>` : ''}
+      ${form.payments.map((p, i) => `
+        <div class="split-row">
+          <span class="split-name">${esc(L.paymentLabel(p.id))}</span>
+          ${i < n - 1 || n < 2
+            ? `<label class="price-input"><span>₪</span><input type="number" inputmode="decimal" min="0" data-split="${i}" value="${p.amount === '' || p.amount == null ? '' : esc(p.amount)}" aria-label="סכום ב${esc(L.paymentLabel(p.id))}"></label>`
+            : '<b class="split-rest" id="splitRest"></b>'}
+        </div>`).join('')}
+      <div id="splitWarn"></div>
+    </div>`;
+    updateSplitRest();
+  }
+
+  // האחרון ברשימה מקבל את מה שנשאר מהסה"כ
+  function updateSplitRest() {
+    const rest = $('#splitRest');
+    if (!form.split || form.payments.length < 2 || !rest) return;
+    const total = L.apptTotal(form);
+    const used = L.round2(form.payments.slice(0, -1).reduce((s, p) => s + L.num(p.amount), 0));
+    rest.textContent = money(Math.max(0, total - used));
+    $('#splitWarn').innerHTML = used > total
+      ? `<div class="warn-box">הסכומים (${money(used)}) גבוהים מהסה״כ (${money(total)})</div>` : '';
   }
 
   // שני השדות מעדכנים זה את זה: השדה שהוקלד נשאר כמו שהוא, השני מחושב ממנו
@@ -1398,6 +1445,19 @@
   let lastSuggestions = [];
 
   function bindFormInputs() {
+    renderPayment();
+    $('#fSplit').addEventListener('change', (e) => {
+      form.split = e.target.checked;
+      if (form.split) form.payments = form.payment ? [{ id: form.payment, amount: '' }] : [];
+      else form.payment = form.payments.length ? form.payments[0].id : form.payment;
+      renderPayment();
+    });
+    $('#splitRows').addEventListener('input', (e) => {
+      const i = e.target.dataset.split;
+      if (i == null) return;
+      form.payments[i].amount = e.target.value === '' ? '' : Number(e.target.value);
+      updateSplitRest();
+    });
     const name = $('#fName');
     const sug = $('#suggest');
     name.addEventListener('input', () => {
@@ -1515,6 +1575,14 @@
       toast(`חסר: ${problems.join(', ')}`);
       return;
     }
+    if (form.split) {
+      const total = L.apptTotal(form);
+      const first = form.payments.slice(0, -1);
+      const used = L.round2(first.reduce((s, p) => s + L.num(p.amount), 0));
+      if (form.payments.length < 2) { toast('בפיצול תשלום צריך לבחור לפחות שני אמצעי תשלום'); return; }
+      if (first.some((p) => !(L.num(p.amount) > 0))) { toast('חסר סכום לאחד מאמצעי התשלום'); return; }
+      if (used > total) { toast('הסכומים גבוהים מהסה״כ לתשלום'); return; }
+    }
     if (form.phone && !L.toIntlPhone(form.phone)) {
       const go = await ask({ title: 'מספר הטלפון נראה לא תקין', text: 'לא יהיה אפשר לשלוח אליו תזכורת בוואטסאפ. לשמור בכל זאת?', ok: 'לשמור', cancel: 'לתקן' });
       if (!go) { $('#fPhone').classList.add('invalid'); $('#fPhone').focus(); return; }
@@ -1547,7 +1615,8 @@
       discount: L.cleanDiscount(form.discount),
       men: !!form.men,
       duration: form.duration || L.DEFAULT_DURATION,
-      payment: form.payment || '',
+      payment: form.split ? (form.payments[0] || {}).id || '' : form.payment || '',
+      payments: form.split ? L.cleanPayments(form.payments) : [],
       status: form.status || 'pending',
       reminderSent: !!form.reminderSent,
       reminderSentAt: form.reminderSent ? (form.reminderSentAt || Date.now()) : null,
@@ -1750,6 +1819,7 @@
       discount: L.cleanDiscount(a.discount),
       duration: Number(a.duration) || L.DEFAULT_DURATION,
       payment: L.ALL_PAYMENTS.some((p) => p.id === a.payment) ? a.payment : '',
+      payments: L.cleanPayments(a.payments),
       status: statuses.has(a.status) ? a.status : 'pending',
       reminderSent: !!a.reminderSent,
       reminderSentAt: a.reminderSentAt || null,
@@ -2071,12 +2141,15 @@
     },
     'f-new-type': () => addFromForm('type'),
     'f-pay': (el) => {
-      form.payment = form.payment === el.dataset.pay ? '' : el.dataset.pay;
-      $$('#payGrid .pay-btn').forEach((b) => {
-        const on = b.dataset.pay === form.payment;
-        b.classList.toggle('on', on);
-        b.setAttribute('aria-pressed', on);
-      });
+      const id = el.dataset.pay;
+      if (form.split) {
+        const i = form.payments.findIndex((p) => p.id === id);
+        if (i >= 0) form.payments.splice(i, 1);
+        else form.payments.push({ id, amount: '' });
+      } else {
+        form.payment = form.payment === id ? '' : id;
+      }
+      renderPayment();
     },
     'f-status': (el) => {
       form.status = el.dataset.status;

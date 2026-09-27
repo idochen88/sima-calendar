@@ -223,6 +223,38 @@
     return p ? p.label : NO_PAYMENT_LABEL;
   }
 
+  // פיצול תשלום: [{ id, amount }], לפחות שני אמצעים שונים. בלי פיצול: []
+  function cleanPayments(list) {
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = list.filter((p) => p && ALL_PAYMENTS.some((x) => x.id === p.id) && !seen.has(p.id) && seen.add(p.id))
+      .map((p) => ({ id: p.id, amount: round2(Math.max(0, num(p.amount))) }));
+    return out.length >= 2 ? out : [];
+  }
+
+  // איך הסכום של הטיפול מתחלק בין אמצעי התשלום.
+  // בפיצול: כל אמצעי מקבל את הסכום שהוזן, והאחרון מקבל את מה שנשאר (כך הסכום תמיד שווה לסה"כ)
+  function paymentParts(a) {
+    const total = apptTotal(a);
+    const split = cleanPayments(a.payments);
+    if (!split.length) {
+      return [{ id: ALL_PAYMENTS.some((p) => p.id === a.payment) ? a.payment : NO_PAYMENT, amount: total }];
+    }
+    let used = 0;
+    return split.map((p, i) => {
+      const amount = i === split.length - 1 ? round2(Math.max(0, total - used)) : Math.min(p.amount, round2(Math.max(0, total - used)));
+      used = round2(used + amount);
+      return { id: p.id, amount };
+    });
+  }
+
+  // טקסט לכרטיס הטיפול: "ביט" / "משולם ₪100 + ביט ₪50" / "" כשלא צוין
+  function paymentText(a) {
+    const parts = paymentParts(a);
+    if (parts.length === 1) return parts[0].id === NO_PAYMENT ? '' : paymentLabel(parts[0].id);
+    return parts.map((p) => `${paymentLabel(p.id)} ${formatMoney(p.amount)}`).join(' + ');
+  }
+
   function statusLabel(id) {
     const s = STATUSES.find((x) => x.id === id);
     return s ? s.label : 'ממתינה';
@@ -292,8 +324,7 @@
       const t = apptTotal(a);
       total += t;
       discountTotal += apptDiscount(a);
-      const key = ALL_PAYMENTS.some((p) => p.id === a.payment) ? a.payment : NO_PAYMENT;
-      byPayment[key] = round2(byPayment[key] + t);
+      for (const p of paymentParts(a)) byPayment[p.id] = round2(byPayment[p.id] + p.amount);
       for (const it of a.items || []) {
         const name = (it.name || 'ללא שם').trim();
         const sum = itemTotal(it);
@@ -624,7 +655,7 @@
     parseDate, fmtDate, todayStr, addDays, dayOfWeek, daysInMonth, monthStart, monthEnd, addMonths,
     weekStart, weekRange, monthRange, monthWeeks, shortDate, longDate, monthLabel, dayName,
     timeToMin, minToTime, apptDuration, apptEnd,
-    num, round2, formatMoney, apptTotal, apptSubtotal, apptDiscount, cleanDiscount, isCounted, paymentLabel, statusLabel, treatmentNames,
+    num, round2, formatMoney, apptTotal, apptSubtotal, apptDiscount, cleanDiscount, isCounted, paymentLabel, cleanPayments, paymentParts, paymentText, statusLabel, treatmentNames,
     isProduct, itemQty, itemTotal, itemLabel, productNames, buildICS,
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,

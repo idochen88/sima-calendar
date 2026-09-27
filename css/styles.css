@@ -831,3 +831,11 @@ input[type=number] { -moz-appearance: textfield; }
 .price-mode button small { color: var(--muted); font-size: 12.5px; }
 .price-mode button.on { border-color: var(--rose); background: var(--rose-soft); color: var(--rose-dark); box-shadow: inset 0 0 0 1px var(--rose); }
 .price-preview { display: block; width: 100%; border-radius: 14px; box-shadow: var(--shadow); margin: 4px 0 14px; background: var(--surface); }
+
+/* ---------- מחירון גברים ---------- */
+.gender-seg { grid-template-columns: 1fr 1fr; margin-bottom: 0; }
+.sub-row.men-row { grid-template-columns: 1fr 110px; }
+.men-name { display: flex; align-items: center; gap: 8px; font-weight: 600; min-height: 44px; }
+.men-name .dot, .men-title .dot { background: var(--tc); width: 8px; height: 8px; flex: none; }
+.men-title { display: flex; align-items: center; gap: 8px; font-weight: 700; margin: 6px 0; }
+.men-block + .men-block { margin-top: 12px; }

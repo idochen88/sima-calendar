@@ -76,10 +76,11 @@
       id: String(t.id || 't-' + uid()),
       name: String(t.name || ''),
       price: L.num(t.price),
+      menPrice: priceOrNull(t.menPrice),
       duration: Number(t.duration) || 30,
       color: t.color || DEFAULT_COLORS[t.id] || PALETTE[i % PALETTE.length].c,
       subs: (Array.isArray(t.subs) ? t.subs : []).map((x) => ({
-        id: String(x.id || 's-' + uid()), name: String(x.name || ''), price: L.num(x.price), duration: Number(x.duration) || 0,
+        id: String(x.id || 's-' + uid()), name: String(x.name || ''), price: L.num(x.price), menPrice: priceOrNull(x.menPrice), duration: Number(x.duration) || 0,
       })),
     }));
     s.products = (Array.isArray(s.products) ? s.products : []).map((p) => ({
@@ -93,6 +94,12 @@
   }
 
   const typeById = (id) => state.settings.treatmentTypes.find((t) => t.id === id);
+
+  // מחירון גברים: רק הסרת שיער. מחיר ריק = עוד לא נקבע
+  const priceOrNull = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : L.num(v));
+  const isHairType = (t) => t.id === 't-hair' || /שיער/.test(t.name);
+  const hairTypes = () => state.settings.treatmentTypes.filter(isHairType);
+  const priceFor = (obj, men) => (men ? obj.menPrice : obj.price);
 
   function itemColor(it) {
     if (L.isProduct(it)) return NEUTRAL;
@@ -948,6 +955,27 @@
       </section>
 
       <section class="card">
+        <h2>מחירון גברים: הסרת שיער</h2>
+        <p class="settings-note">האזורים נלקחים מהסרת השיער שלמעלה, וכל אזור חדש שתוסיפי שם יופיע כאן אוטומטית. בטיפול חדש בוחרים "גברים" והמחירים מכאן נכנסים לבד.</p>
+        <div id="menList">
+          ${hairTypes().length ? hairTypes().map((t) => `
+            <div class="men-block" data-type-id="${t.id}" style="--tc:${t.color}">
+              ${hairTypes().length > 1 ? `<div class="men-title"><i class="dot"></i>${esc(t.name)}</div>` : ''}
+              <div class="sub-row men-row sub-labels"><span>אזור</span><span>מחיר לגברים ₪</span></div>
+              ${t.subs.map((sb) => `
+              <div class="sub-row men-row" data-sub-id="${sb.id}">
+                <span class="men-name"><i class="dot"></i>${esc(sb.name || 'ללא שם')}</span>
+                <input type="number" inputmode="decimal" min="0" data-field="menPrice" value="${sb.menPrice == null ? '' : esc(sb.menPrice)}" placeholder="מחיר" class="ltr" aria-label="מחיר לגברים: ${esc(sb.name)}">
+              </div>`).join('')}
+              <div class="sub-row men-row">
+                <span class="men-name"><i class="dot"></i>${t.subs.length ? 'כללי' : esc(t.name)}</span>
+                <input type="number" inputmode="decimal" min="0" data-field="menPrice" value="${t.menPrice == null ? '' : esc(t.menPrice)}" placeholder="מחיר" class="ltr" aria-label="מחיר לגברים: ${esc(t.name)}">
+              </div>
+            </div>`).join('') : '<p class="muted" style="margin:0">אין סוג טיפול בשם "הסרת שיער".</p>'}
+        </div>
+      </section>
+
+      <section class="card">
         <h2>תכשירים למכירה</h2>
         <p class="settings-note">תכשירים שלקוחות קונות. בטיפול אפשר לבחור אותם, לשנות כמות ומחיר, והם נספרים בהכנסות.</p>
         <div id="productsList">
@@ -1093,6 +1121,7 @@
       date: preset.date || today(),
       time,
       items: [],
+      men: !!preset.men,
       duration: 0,
       durationTouched: false,
       payment: '',
@@ -1125,7 +1154,7 @@
       </div>
       <div class="sheet-body" id="apptForm">
         <div class="field">
-          <label for="fName">שם הלקוחה</label>
+          <label for="fName" id="fNameLabel">${f.men ? 'שם הלקוח' : 'שם הלקוחה'}</label>
           <input id="fName" type="text" value="${esc(f.clientName)}" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="הקלידי שם…">
           <div id="suggest" class="suggest" hidden></div>
           ${canPickContact() ? `<button type="button" class="link-btn" data-action="pick-contact">${'בחירה מאנשי הקשר'}</button>` : ''}
@@ -1140,6 +1169,14 @@
         <div class="two-col">
           <div class="field"><label for="fDate">תאריך</label><input id="fDate" type="date" value="${esc(f.date)}"></div>
           <div class="field"><label for="fTime">שעה</label><input id="fTime" type="time" step="300" value="${esc(f.time)}"></div>
+        </div>
+
+        <div class="field">
+          <span class="field-label">מחירון</span>
+          <div class="seg-tabs gender-seg" id="fGender">
+            <button type="button" class="${f.men ? '' : 'on'}" data-action="f-gender" data-men="" aria-pressed="${!f.men}">נשים</button>
+            <button type="button" class="${f.men ? 'on' : ''}" data-action="f-gender" data-men="1" aria-pressed="${!!f.men}">גברים</button>
+          </div>
         </div>
 
         <div class="field">
@@ -1217,8 +1254,10 @@
   }
 
   function renderFormItems() {
-    const types = state.settings.treatmentTypes;
+    const men = !!form.men;
+    const types = men ? hairTypes() : state.settings.treatmentTypes;
     const sel = form.items;
+    const tag = (obj) => { const p = priceFor(obj, men); return p == null ? 'אין מחיר' : money(p); };
     const countFor = (tid) => sel.filter((i) => !L.isProduct(i) && i.typeId === tid).length;
 
     $('#typeChips').innerHTML = types.map((t) => {
@@ -1228,7 +1267,7 @@
       return `<button type="button" class="chip tchip ${n ? 'on' : ''} ${open ? 'open' : ''}" style="--tc:${t.color}"
         data-action="f-type" data-type="${t.id}" aria-pressed="${!!n}" ${hasSubs ? `aria-expanded="${open}"` : ''}>
         <i class="dot"></i>${esc(t.name || 'ללא שם')}${hasSubs ? `<span class="chev">${n > 1 ? n + ' ' : ''}${open ? '▴' : '▾'}</span>` : ''}</button>`;
-    }).join('') + '<button type="button" class="chip add" data-action="f-new-type">+ סוג חדש</button>';
+    }).join('') + (men ? '' : '<button type="button" class="chip add" data-action="f-new-type">+ סוג חדש</button>');
 
     const ot = form.openType && typeById(form.openType);
     $('#subPanel').innerHTML = ot ? `
@@ -1238,10 +1277,10 @@
           ${ot.subs.map((sb) => {
             const on = sel.some((i) => i.typeId === ot.id && i.subId === sb.id);
             return `<button type="button" class="chip tchip ${on ? 'on' : ''}" style="--tc:${ot.color}" data-action="f-sub" data-type="${ot.id}" data-sub="${sb.id}" aria-pressed="${on}">
-              ${esc(sb.name || 'ללא שם')}<small>${money(sb.price)}</small></button>`;
+              ${esc(sb.name || 'ללא שם')}<small>${tag(sb)}</small></button>`;
           }).join('')}
-          ${(() => { const on = sel.some((i) => i.typeId === ot.id && !i.subId); return `<button type="button" class="chip tchip ${on ? 'on' : ''}" style="--tc:${ot.color}" data-action="f-sub" data-type="${ot.id}" data-sub="" aria-pressed="${on}">כללי<small>${money(ot.price)}</small></button>`; })()}
-          <button type="button" class="chip add" data-action="f-new-sub" data-type="${ot.id}">+ תת-סוג חדש</button>
+          ${(() => { const on = sel.some((i) => i.typeId === ot.id && !i.subId); return `<button type="button" class="chip tchip ${on ? 'on' : ''}" style="--tc:${ot.color}" data-action="f-sub" data-type="${ot.id}" data-sub="" aria-pressed="${on}">כללי<small>${tag(ot)}</small></button>`; })()}
+          ${men ? '' : `<button type="button" class="chip add" data-action="f-new-sub" data-type="${ot.id}">+ תת-סוג חדש</button>`}
         </div>
       </div>` : '';
 
@@ -1266,9 +1305,10 @@
   }
 
   function treatmentItem(t, sb) {
+    const p = priceFor(sb || t, form.men);
     return {
       kind: 'treatment', typeId: t.id, subId: sb ? sb.id : null, name: t.name, sub: sb ? sb.name : '',
-      price: sb ? sb.price : t.price, duration: sb ? (sb.duration || t.duration) : t.duration, color: t.color,
+      price: p == null ? '' : p, duration: sb ? (sb.duration || t.duration) : t.duration, color: t.color,
     };
   }
 
@@ -1498,6 +1538,7 @@
       time: form.time,
       items: form.items.map(cleanItem),
       discount: L.cleanDiscount(form.discount),
+      men: !!form.men,
       duration: form.duration || L.DEFAULT_DURATION,
       payment: form.payment || '',
       status: form.status || 'pending',
@@ -1833,6 +1874,17 @@
         await saveSettings();
         toast('נשמר');
       });
+      $('#menList').addEventListener('change', async (e) => {
+        const card = e.target.closest('[data-type-id]');
+        const t = card && typeById(card.dataset.typeId);
+        if (!t || e.target.dataset.field !== 'menPrice') return;
+        const subRow = e.target.closest('[data-sub-id]');
+        const obj = subRow ? t.subs.find((x) => x.id === subRow.dataset.subId) : t;
+        if (!obj) return;
+        obj.menPrice = priceOrNull(e.target.value);
+        await saveSettings();
+        toast('נשמר');
+      });
       $('#productsList').addEventListener('change', async (e) => {
         const f = e.target.dataset.field;
         const row = e.target.closest('[data-product-id]');
@@ -1967,6 +2019,29 @@
       if (!t) return;
       const sb = el.dataset.sub ? t.subs.find((x) => x.id === el.dataset.sub) : null;
       toggleItem((i) => !L.isProduct(i) && i.typeId === t.id && (i.subId || null) === (sb ? sb.id : null), () => treatmentItem(t, sb));
+    },
+    'f-gender': (el) => {
+      const men = !!el.dataset.men;
+      if (form.men === men) return;
+      form.men = men;
+      // מחירי הסרת השיער שכבר נבחרו עוברים למחירון החדש
+      form.items.forEach((it) => {
+        const t = !L.isProduct(it) && typeById(it.typeId);
+        if (!t || !isHairType(t)) return;
+        const sb = it.subId ? t.subs.find((x) => x.id === it.subId) : null;
+        const p = priceFor(sb || t, men);
+        it.price = p == null ? '' : p;
+      });
+      const hair = hairTypes()[0];
+      if (men && hair && hair.subs.length) form.openType = hair.id;
+      else if (men && form.openType && !isHairType(typeById(form.openType) || {})) form.openType = null;
+      $$('#fGender button').forEach((b) => {
+        const on = !!b.dataset.men === men;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-pressed', on);
+      });
+      $('#fNameLabel').textContent = men ? 'שם הלקוח' : 'שם הלקוחה';
+      renderFormItems();
     },
     'f-product': (el) => {
       const pr = state.settings.products.find((x) => x.id === el.dataset.product);

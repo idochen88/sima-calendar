@@ -27,6 +27,7 @@
     <button class="tab" type="button" data-action="tab" data-tab="reminders"><span class="tab-icon" data-icon="bell"></span><span>תזכורות</span><b class="tab-badge" id="remBadge" hidden></b></button>
     <button class="tab" type="button" data-action="tab" data-tab="summary"><span class="tab-icon" data-icon="chart"></span><span>סיכומים</span></button>
     <button class="tab" type="button" data-action="tab" data-tab="clients"><span class="tab-icon" data-icon="users"></span><span>לקוחות</span></button>
+    <button class="tab" type="button" data-action="tab" data-tab="decls"><span class="tab-icon" data-icon="doc"></span><span>הצהרות</span><b class="tab-badge" id="declBadge" hidden></b></button>
     <button class="tab" type="button" data-action="tab" data-tab="prices"><span class="tab-icon" data-icon="tag"></span><span>מחירון</span></button>
   </nav>
 
@@ -41,8 +42,11 @@
   <div id="toast" class="toast" role="status"></div>
   <input id="importFile" type="file" accept="application/json,.json" hidden>
   <input id="contactsFile" type="file" hidden>
+  <input id="photoFile" type="file" accept="image/*" multiple hidden>
 
   <script src="js/logic.js"></script>
+  <script src="js/forms.js"></script>
+  <script src="js/cloud.js"></script>
   <script src="js/db.js"></script>
   <script src="js/app.js"></script>
 </body>

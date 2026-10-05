@@ -5,7 +5,7 @@
   'use strict';
 
   const DB_NAME = 'sima-calendar';
-  const DB_VERSION = 1;
+  const DB_VERSION = 3;
   const LS_KEY = 'sima-calendar-data';
 
   function reqToPromise(req) {
@@ -58,6 +58,54 @@
         tx.objectStore('kv').put(meta || {}, 'meta');
         return txDone(tx);
       },
+      // תמונות לפני/אחרי של לקוחות: { id, clientKey, clientName, date, createdAt, data (dataURL) }
+      async getPhotos(clientKey) {
+        const tx = db.transaction('photos', 'readonly');
+        return reqToPromise(tx.objectStore('photos').index('clientKey').getAll(clientKey));
+      },
+      async getAllPhotos() {
+        const tx = db.transaction('photos', 'readonly');
+        return reqToPromise(tx.objectStore('photos').getAll());
+      },
+      async putPhoto(p) {
+        const tx = db.transaction('photos', 'readwrite');
+        tx.objectStore('photos').put(p);
+        return txDone(tx);
+      },
+      async deletePhoto(id) {
+        const tx = db.transaction('photos', 'readwrite');
+        tx.objectStore('photos').delete(id);
+        return txDone(tx);
+      },
+      async replacePhotos(list) {
+        const tx = db.transaction('photos', 'readwrite');
+        const store = tx.objectStore('photos');
+        store.clear();
+        list.forEach((p) => store.put(p));
+        return txDone(tx);
+      },
+      // הצהרות בריאות שהתקבלו מהטופס
+      async getDeclarations() {
+        const tx = db.transaction('declarations', 'readonly');
+        return reqToPromise(tx.objectStore('declarations').getAll());
+      },
+      async putDeclaration(d) {
+        const tx = db.transaction('declarations', 'readwrite');
+        tx.objectStore('declarations').put(d);
+        return txDone(tx);
+      },
+      async deleteDeclaration(id) {
+        const tx = db.transaction('declarations', 'readwrite');
+        tx.objectStore('declarations').delete(id);
+        return txDone(tx);
+      },
+      async replaceDeclarations(list) {
+        const tx = db.transaction('declarations', 'readwrite');
+        const store = tx.objectStore('declarations');
+        store.clear();
+        list.forEach((d) => store.put(d));
+        return txDone(tx);
+      },
     };
   }
 
@@ -91,6 +139,45 @@
         const d = read(); // אנשי הקשר נשמרים, רק הטיפולים וההגדרות מוחלפים
         write({ ...d, appointments: data.appointments, settings: data.settings, meta: data.meta || {} });
       },
+      async getPhotos(clientKey) {
+        return (read().photos || []).filter((p) => p.clientKey === clientKey);
+      },
+      async getAllPhotos() {
+        return read().photos || [];
+      },
+      async putPhoto(p) {
+        const d = read();
+        d.photos = (d.photos || []).filter((x) => x.id !== p.id).concat(p);
+        write(d);
+      },
+      async deletePhoto(id) {
+        const d = read();
+        d.photos = (d.photos || []).filter((x) => x.id !== id);
+        write(d);
+      },
+      async replacePhotos(list) {
+        const d = read();
+        d.photos = list;
+        write(d);
+      },
+      async getDeclarations() {
+        return read().declarations || [];
+      },
+      async putDeclaration(x) {
+        const d = read();
+        d.declarations = (d.declarations || []).filter((y) => y.id !== x.id).concat(x);
+        write(d);
+      },
+      async deleteDeclaration(id) {
+        const d = read();
+        d.declarations = (d.declarations || []).filter((y) => y.id !== id);
+        write(d);
+      },
+      async replaceDeclarations(list) {
+        const d = read();
+        d.declarations = list;
+        write(d);
+      },
     };
   }
 
@@ -104,10 +191,21 @@
           db.createObjectStore('appointments', { keyPath: 'id' });
         }
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv');
+        if (!db.objectStoreNames.contains('photos')) {
+          db.createObjectStore('photos', { keyPath: 'id' }).createIndex('clientKey', 'clientKey');
+        }
+        if (!db.objectStoreNames.contains('declarations')) db.createObjectStore('declarations', { keyPath: 'id' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // גרסה חדשה של האפליקציה נפתחה בלשונית אחרת — משחררים כדי לא לחסום את השדרוג שלה
+        db.onversionchange = () => { db.close(); location.reload(); };
+        resolve(db);
+      };
       req.onerror = () => reject(req.error);
-      req.onblocked = () => reject(new Error('indexedDB blocked'));
+      // שדרוג מסד הנתונים מחכה שגרסה ישנה שפתוחה בלשונית אחרת תיסגר.
+      // לא עוברים ל-localStorage במקרה כזה, אחרת האפליקציה תיפתח בלי הנתונים.
+      req.onblocked = () => console.warn('indexedDB upgrade waiting for another tab to close');
     });
   }
 

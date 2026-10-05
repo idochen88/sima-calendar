@@ -393,3 +393,31 @@ test('פיצול תשלום: האחרון מקבל את היתרה, והסיכו
   assert.deepEqual(L.paymentParts({ items: [{ price: 50 }], payment: 'bit' }), [{ id: 'bit', amount: 50 }]);
   assert.equal(L.paymentText({ items: [], payment: '' }), '');
 });
+
+/* ---------- הצהרות בריאות ---------- */
+test('phoneKey: אותו מספר בכל הכתיבים', () => {
+  assert.equal(L.phoneKey('050-1234567'), '501234567');
+  assert.equal(L.phoneKey('+972 50 123 4567'), '501234567');
+  assert.equal(L.phoneKey('501234567'), '501234567');
+  assert.equal(L.phoneKey('12'), '');
+});
+
+test('matchByPhone מוצא לפי טלפון', () => {
+  const people = [{ name: 'רות', phone: '052-7777777' }, { name: 'דנה', phone: '+972501234567' }];
+  assert.equal(L.matchByPhone(people, '0501234567').name, 'דנה');
+  assert.equal(L.matchByPhone(people, '0549999999'), null);
+  assert.equal(L.matchByPhone(people, ''), null);
+});
+
+test('declStatus: האחרונה, ופג תוקף אחרי שנה', () => {
+  const decls = [
+    { clientKey: 'דנה', formId: 'hair', date: '2025-09-01', createdAt: 1 },
+    { clientKey: 'דנה', formId: 'hair', date: '2025-10-10', createdAt: 2 },
+    { clientKey: 'רות', formId: 'hair', date: '2026-10-01', createdAt: 3 },
+  ];
+  assert.equal(L.declStatus(decls, 'דנה', 'hair', '2026-10-05').state, 'valid');
+  assert.equal(L.declStatus(decls, 'דנה', 'hair', '2026-10-05').last.date, '2025-10-10');
+  assert.equal(L.declStatus(decls, 'דנה', 'hair', '2026-10-11').state, 'expired');
+  assert.equal(L.declStatus(decls, 'מיכל', 'hair', '2026-10-05').state, 'none');
+  assert.equal(L.declStatus(decls, 'דנה', 'face', '2026-10-05').state, 'none');
+});

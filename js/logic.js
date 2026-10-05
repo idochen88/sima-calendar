@@ -649,6 +649,36 @@
     return t ? t.value : '';
   }
 
+  /* ---------- הצהרות בריאות ---------- */
+  const DECL_VALID_DAYS = 365;
+
+  // 9 הספרות האחרונות, כדי ש-050..., 50... ו-97250... ייחשבו אותו מספר
+  function phoneKey(raw) {
+    const intl = toIntlPhone(raw);
+    return intl ? intl.slice(-9) : '';
+  }
+
+  // מוצא לקוחה או איש קשר לפי מספר הטלפון שמולא בהצהרה
+  function matchByPhone(people, phone) {
+    const k = phoneKey(phone);
+    if (!k) return null;
+    return people.find((p) => phoneKey(p.phone) === k) || null;
+  }
+
+  function daysBetween(a, b) {
+    return Math.round((parseDate(b) - parseDate(a)) / 864e5);
+  }
+
+  // ההצהרה האחרונה של לקוחה לטופס מסוים, והאם עברה שנה מאז
+  function declStatus(decls, clientKey, formId, today) {
+    const mine = decls.filter((d) => d.clientKey === clientKey && d.formId === formId)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    const last = mine[0];
+    if (!last) return { state: 'none', last: null, count: 0 };
+    const days = daysBetween(last.date, today);
+    return { state: days > DECL_VALID_DAYS ? 'expired' : 'valid', last, days, count: mine.length };
+  }
+
   const api = {
     PAYMENTS, LEGACY_PAYMENTS, ALL_PAYMENTS, NO_PAYMENT, NO_PAYMENT_LABEL, STATUSES, DAY_NAMES, DAY_LETTERS, MONTH_NAMES,
     DEFAULT_DURATION, DEFAULT_TEMPLATE,
@@ -660,6 +690,7 @@
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,
     normName, clientsIndex, searchClients, parseVCards, priceList, isHairType,
+    DECL_VALID_DAYS, phoneKey, matchByPhone, daysBetween, declStatus,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

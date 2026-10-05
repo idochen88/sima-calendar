@@ -1,0 +1,20 @@
+rules_version = '2';
+
+// כללי אבטחה לתיבת ההצהרות. מדביקים ב-Firebase: Firestore Database ← Rules.
+// ה-UID הוא של המשתמש של סימה ב-Authentication ← Users.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /declarations/{id} {
+      // כל אחד יכול רק לשלוח הצהרה חדשה, בגודל סביר ובמבנה הנכון
+      allow create: if request.resource.data.keys().hasOnly(['formId', 'payload', 'createdAt'])
+        && request.resource.data.formId is string
+        && request.resource.data.formId.size() < 40
+        && request.resource.data.payload is string
+        && request.resource.data.payload.size() < 400000
+        && request.resource.data.createdAt is timestamp;
+
+      // רק סימה (אחרי התחברות באפליקציה) יכולה לקרוא ולמחוק
+      allow read, delete: if request.auth != null && request.auth.uid == 'gOGxlH5BrTfFDcIKp9lapBShLaS2';
+    }
+  }
+}

@@ -1,5 +1,5 @@
 // מטמון לעבודה אופליין. בכל עדכון של קבצי האפליקציה — להעלות את מספר הגרסה.
-const CACHE = 'sima-calendar-v10';
+const CACHE = 'sima-calendar-v12';
 const ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,10 @@ const ASSETS = [
   './js/logic.js',
   './js/db.js',
   './js/app.js',
+  './js/forms.js',
+  './js/cloud.js',
+  './js/form.js',
+  './form.html',
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -32,7 +36,9 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
-  const key = req.mode === 'navigate' ? './index.html' : req;
+  // ניווט לאפליקציה נשמר תחת index.html; דף הטופס נשמר בנפרד
+  const isForm = /\/form\.html$/.test(new URL(req.url).pathname);
+  const key = req.mode === 'navigate' && !isForm ? './index.html' : req;
   e.respondWith(
     fetch(req, { cache: 'no-cache' })
       .then((res) => {

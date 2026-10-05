@@ -361,7 +361,7 @@ svg { display: block; }
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0;
   z-index: 30;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, 1fr);
   height: calc(var(--tabbar-h) + var(--safe-bottom));
   padding-bottom: var(--safe-bottom);
   background: rgba(255, 255, 255, .92);
@@ -376,7 +376,7 @@ svg { display: block; }
 }
 .tab-icon svg { width: 26px; height: 26px; }
 .tab.active { color: var(--rose-dark); }
-.tab.active .tab-icon { background: var(--rose-soft); border-radius: 14px; padding: 2px 14px; }
+.tab.active .tab-icon { background: var(--rose-soft); border-radius: 14px; padding: 2px 12px; }
 .tab-badge {
   position: absolute; top: 6px; left: calc(50% - 26px);
   min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
@@ -854,3 +854,117 @@ input[type=number] { -moz-appearance: textfield; }
 .split-rest::after { content: ' (היתרה)'; font-size: 12.5px; color: var(--muted); font-weight: 500; }
 .split-hint { margin: 8px 0; color: var(--muted); font-size: 14px; }
 .split-box .warn-box { margin: 4px 0 8px; }
+
+/* ---------- כרטיס לקוחה ותמונות לפני/אחרי ---------- */
+.client-head { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
+.client-head h1 { font-size: 24px; line-height: 1.2; margin: 0; font-weight: 800; }
+.ba { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.ba-cell { position: relative; display: block; text-align: center; min-width: 0; }
+.ba-cell img {
+  display: block; width: 100%; aspect-ratio: 4 / 5; object-fit: cover;
+  border-radius: 14px; background: var(--beige);
+}
+.ba-tag {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(255, 255, 255, .92); color: var(--rose-dark);
+  font-weight: 800; font-size: 14px; padding: 3px 10px; border-radius: 10px;
+}
+.ba-cell small { display: block; margin-top: 4px; color: var(--muted); font-size: 13px; }
+.list-head small { font-weight: 500; }
+.photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.photo-thumb { position: relative; display: block; min-width: 0; }
+.photo-thumb img {
+  display: block; width: 100%; aspect-ratio: 1; object-fit: cover;
+  border-radius: 10px; background: var(--beige);
+}
+.photo-thumb.picked img { outline: 3px solid var(--rose); outline-offset: -3px; }
+.photo-thumb span {
+  position: absolute; bottom: 5px; right: 5px;
+  background: var(--rose); color: #fff; font-size: 12px; font-weight: 700;
+  padding: 1px 7px; border-radius: 8px;
+}
+.photo-full { display: block; width: 100%; max-height: 60vh; object-fit: contain; border-radius: 14px; background: var(--beige); margin-bottom: 14px; }
+
+/* ---------- הצהרות בריאות (באפליקציה) ---------- */
+.card.notice { background: var(--rose-softer); box-shadow: none; border: 1.5px solid var(--rose-soft); }
+.h2-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.icon-btn.small { width: 38px; height: 38px; box-shadow: none; background: var(--rose-softer); }
+.icon-btn.small svg { width: 19px; height: 19px; }
+.sync-line { margin: -6px 0 10px; }
+.sync-line .warn { color: var(--orange); font-weight: 600; }
+.form-item { padding: 4px 0; }
+.form-item-title { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: var(--rose-dark); }
+.form-item-title svg { width: 22px; height: 22px; flex: none; }
+.form-item-title b { color: var(--text); font-size: 17px; }
+.form-item-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.form-item-actions .btn.small { width: 100%; padding: 0 6px; gap: 5px; }
+.form-item-actions .btn.small svg { width: 18px; height: 18px; }
+.decl-row .cr-main > span { display: block; }
+.decl-chips { display: flex !important; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
+.decl-chips i { font-style: normal; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 8px; }
+.chip-new { background: var(--rose); color: #fff; }
+.chip-soft { background: var(--beige); color: #7d665f; }
+.chip-warn { background: var(--orange-soft); color: #9a5a12; }
+.decl-status { border-radius: 14px; padding: 12px; margin-bottom: 8px; background: var(--bg); }
+.decl-status:last-child { margin-bottom: 0; }
+.decl-status.none { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.decl-status b { display: block; }
+.decl-status small { color: var(--muted); font-size: 13px; }
+.decl-status.valid { background: var(--green-soft); }
+.decl-status.valid small { color: #2c6a47; }
+.decl-status.expired { background: var(--orange-soft); }
+.decl-status.expired small, .decl-status.expired p { color: #9a5a12; }
+.decl-status.expired p { margin: 6px 0 10px; font-size: 14px; }
+.decl-status .btn.small { flex: none; }
+.decl-open { display: block; width: 100%; text-align: start; }
+.yes-card { background: var(--orange-soft); box-shadow: none; }
+.yes-card h2 { color: #9a5a12; }
+.ok-card { background: var(--green-soft); color: #2c6a47; font-weight: 700; box-shadow: none; }
+.ans { padding: 9px 0; border-bottom: 1px solid var(--line); position: relative; padding-left: 40px; }
+.ans:last-child { border-bottom: 0; }
+.ans p { margin: 0; font-size: 15px; }
+.ans b { display: block; margin-top: 4px; color: #9a5a12; font-size: 15px; }
+.ans-val { position: absolute; left: 0; top: 9px; font-weight: 700; color: var(--muted); font-size: 14px; }
+.ans.yes .ans-val { color: var(--orange); }
+.yes-card .ans { border-color: rgba(154, 90, 18, .15); padding-left: 0; }
+.ok-line { margin: 0 0 6px; color: #2c6a47; font-weight: 600; }
+.sig-img { display: block; width: 100%; max-width: 420px; background: #fff; border: 1.5px solid var(--line); border-radius: 12px; }
+ol.legal { margin: 8px 0 12px; padding-inline-start: 22px; font-size: 14px; line-height: 1.55; color: #5a464b; }
+ol.legal li { margin-bottom: 6px; }
+
+/* ---------- דף הטופס ללקוחה ---------- */
+.form-page .view { padding-bottom: calc(var(--safe-bottom) + 40px); }
+.form-head { text-align: center; margin: 10px 0 18px; }
+.form-biz { margin: 0; color: var(--rose); font-weight: 700; font-size: 14px; }
+.form-head h1 { margin: 4px 0 6px; font-size: 26px; font-weight: 800; }
+.form-head .sub { color: var(--muted); margin: 0; font-size: 15px; }
+.seg-tabs.two { grid-template-columns: 1fr 1fr; margin-bottom: 0; }
+.field input[type=email] {
+  width: 100%; min-height: 52px; border-radius: 14px; border: 1.5px solid var(--line);
+  background: var(--surface); padding: 12px 14px; font-size: 17px; outline: none; -webkit-appearance: none; appearance: none;
+}
+.q { padding: 12px 0; border-bottom: 1px solid var(--line); border-radius: 0; }
+.q:last-child { border-bottom: 0; }
+.q.invalid { background: var(--red-soft); border-radius: 12px; padding: 12px 10px; }
+.q-text { margin: 0 0 8px; font-size: 16px; }
+.yn { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.yn button {
+  min-height: 46px; border-radius: 12px; font-weight: 700; font-size: 16px;
+  border: 1.5px solid var(--line); background: var(--surface); color: #7d665f;
+}
+.yn button.on { background: var(--rose-soft); border-color: var(--rose); color: var(--rose-dark); }
+.yn button.on.yes { background: var(--orange-soft); border-color: var(--orange); color: #9a5a12; }
+.q-details {
+  display: block; width: 100%; min-height: 70px; margin-top: 8px; border-radius: 12px;
+  border: 1.5px solid var(--line); padding: 10px 12px; font-size: 16px; resize: vertical; outline: none;
+}
+.q-details.invalid { border-color: var(--red); background: #FFF8F8; }
+.check-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border-radius: 12px; background: var(--rose-softer); font-weight: 700; }
+.check-row input { width: 24px; height: 24px; flex: none; margin: 0; accent-color: var(--rose); }
+.check-row.invalid { background: var(--red-soft); outline: 1.5px solid var(--red); }
+.sig-box { position: relative; border: 1.5px dashed var(--beige-2); border-radius: 14px; background: #fff; }
+.sig-box canvas { display: block; width: 100%; height: 190px; touch-action: none; }
+.sig-box.invalid { border-color: var(--red); border-style: solid; }
+.sig-clear { position: absolute; top: 4px; left: 8px; }
+.form-done h1 { margin: 6px 0; font-size: 24px; }
+.form-done p { color: var(--muted); }

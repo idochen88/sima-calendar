@@ -39,6 +39,11 @@
       move: s('<rect x="3" y="4.5" width="18" height="16.5" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4M9 15h6M13 13l2 2-2 2"/>'),
       tag: s('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'),
       share: s('<path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>'),
+      camera: s('<path d="M3 8a2 2 0 0 1 2-2h2.5l1.5-2h6l1.5 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/>'),
+      doc: s('<rect x="5" y="3.5" width="14" height="18" rx="2.5"/><path d="M9 3.5V2.5h6v1M9 9.5h6M9 13.5h6M9 17.5h3"/>'),
+      copy: s('<rect x="8" y="8" width="13" height="13" rx="2.5"/><path d="M16 8V5.5A2.5 2.5 0 0 0 13.5 3h-8A2.5 2.5 0 0 0 3 5.5v8A2.5 2.5 0 0 0 5.5 16H8"/>'),
+      eye: s('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+      refresh: s('<path d="M20 11a8 8 0 0 0-14.6-4.5L4 8M4 3v5h5M4 13a8 8 0 0 0 14.6 4.5L20 16M20 21v-5h-5"/>'),
       bag: s('<path d="M5 8h14l-1 13H6L5 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/>'),
     };
   })();
@@ -138,6 +143,13 @@
     clientFilter: 'all',
     priceMen: false,
     contacts: [],
+    clientKey: null,
+    clientName: '',
+    clientBack: 'clients',
+    photoCache: {}, // תמונות לפי לקוחה, נטענות כשנכנסים לכרטיס
+    compare: {}, // איזו תמונה היא "לפני" ואיזו "אחרי" לכל לקוחה
+    decls: [], // הצהרות בריאות שהתקבלו
+    declSync: { at: 0, error: '' },
   };
 
   const findAppt = (id) => state.appts.find((a) => a.id === id);
@@ -604,7 +616,8 @@
 
   function findPerson(key) {
     const { clients, contacts } = peopleIndex();
-    return clients.find((c) => c.key === key) || contacts.find((c) => c.key === key);
+    return clients.find((c) => c.key === key) || contacts.find((c) => c.key === key)
+      || contacts.find((c) => L.normName(c.name) === key);
   }
 
   const CONTACTS_PAGE = 200;
@@ -662,41 +675,629 @@
       <div id="clientList">${clientListHTML()}</div>`;
   }
 
+  /* ---------- כרטיס לקוחה ---------- */
   function openClient(key) {
     const c = findPerson(key);
     if (!c) return;
+    state.clientKey = c.key;
+    state.clientName = c.name;
+    if (state.view !== 'client') state.clientBack = state.view;
+    go('client');
+  }
+
+  // מפתח הלקוחה נשמר גם לפי שם, כדי שאיש קשר שקבע טיפול ימשיך לאותו כרטיס
+  function currentClient() {
+    const c = findPerson(state.clientKey) || findPerson(L.normName(state.clientName));
+    if (c) { state.clientKey = c.key; state.clientName = c.name; }
+    return c;
+  }
+
+  function viewClient() {
+    const c = currentClient();
+    const head = `<div class="vhead">
+        <button class="back-btn" data-action="back-client">${I.right}<span>לקוחות</span></button>
+        <div class="vhead-title"></div>
+      </div>`;
+    if (!c) return head + '<div class="card empty">הלקוחה לא נמצאה</div>';
     const hist = [...c.appts].sort((a, b) => (b.date + b.time).localeCompare(a.date + a.time));
     const intl = L.toIntlPhone(c.phone);
+    const pk = photoKey(c);
+    return `${head}
+      <div class="client-head">
+        <span class="avatar big">${esc(initial(c.name))}</span>
+        <div><h1>${esc(c.name)}</h1>
+          <div class="muted ltr">${esc(c.phone || 'אין טלפון')}</div></div>
+      </div>
+      ${intl ? `<div class="quick-contact" style="margin-bottom:14px">
+        <a class="btn secondary" href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}">${I.phone}חיוג</a>
+        <a class="btn wa" href="https://wa.me/${intl}" target="_blank" rel="noopener">${I.wa}וואטסאפ</a>
+      </div>` : ''}
+      ${c.contact ? '' : `<div class="stat-grid">
+        <div class="stat"><small>ביקורים</small><b>${c.visits}</b></div>
+        <div class="stat"><small>סכום כולל</small><b>${money(c.total)}</b></div>
+      </div>`}
+      <button class="btn" data-action="new-appt-client" data-key="${esc(c.key)}" style="margin-bottom:14px">${I.plus}טיפול חדש ל${esc(c.name)}</button>
+      ${clientDeclsHTML(c)}
+      <section class="card" id="photoArea">${state.photoCache[pk] ? photosHTML(pk) : '<h2>תמונות לפני ואחרי</h2><p class="settings-note">טוען…</p>'}</section>
+      ${c.contact ? '<div class="card empty">עוד לא היו טיפולים 🌸</div>' : `
+      <section class="card"><h2>היסטוריית טיפולים <small>(${hist.length})</small></h2>
+        ${hist.map((a) => `<button class="history-item" data-action="edit-appt" data-id="${a.id}">
+          <span class="hi-date"><b>${L.shortDate(a.date)}${a.date.slice(0, 4) === today().slice(0, 4) ? '' : '.' + a.date.slice(2, 4)}</b><small>${esc(a.time)}</small></span>
+          <span class="hi-main"><i class="dot" style="background:${apptColor(a)}"></i> ${esc(L.treatmentNames(a) || L.productNames(a))}${a.notes ? `<br><small class="muted">${esc(a.notes)}</small>` : ''}</span>
+          <span style="text-align:center"><span class="hi-price">${money(L.apptTotal(a))}</span><br><span class="pill ${a.status}">${L.statusLabel(a.status)}</span></span>
+        </button>`).join('')}
+      </section>`}`;
+  }
+
+  /* ---------- תמונות לפני / אחרי ---------- */
+  const photoKey = (c) => L.normName(c.name);
+  const sortPhotos = (list) => [...list].sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
+  const fullShortDate = (d) => `${L.shortDate(d)}.${d.slice(2, 4)}`;
+
+  function agoLabel(d) {
+    const days = Math.round((Date.parse(today()) - Date.parse(d)) / 864e5);
+    if (days <= 0) return 'היום';
+    if (days === 1) return 'אתמול';
+    if (days < 31) return `לפני ${days} ימים`;
+    const months = Math.round(days / 30.4);
+    if (months < 12) return months === 1 ? 'לפני חודש' : `לפני ${months} חודשים`;
+    const years = Math.floor(days / 365);
+    return years === 1 ? 'לפני שנה' : `לפני ${years} שנים`;
+  }
+
+  async function loadPhotos(pk) {
+    if (!state.photoCache[pk]) state.photoCache[pk] = await state.store.getPhotos(pk);
+    return state.photoCache[pk];
+  }
+
+  function refreshPhotos() {
+    const area = $('#photoArea');
+    const c = state.view === 'client' && currentClient();
+    if (area && c) area.innerHTML = photosHTML(photoKey(c));
+  }
+
+  // ברירת המחדל: הישנה ביותר מול החדשה ביותר, אלא אם בחרת אחרות
+  function comparePair(pk) {
+    const list = sortPhotos(state.photoCache[pk] || []);
+    if (list.length < 2) return null;
+    const sel = state.compare[pk] || {};
+    let before = list.find((p) => p.id === sel.before) || list[list.length - 1];
+    let after = list.find((p) => p.id === sel.after) || list[0];
+    if (before.id === after.id) {
+      if (sel.after === after.id) before = list.find((p) => p.id !== after.id);
+      else after = list.find((p) => p.id !== before.id);
+    }
+    return { before, after };
+  }
+
+  function photosHTML(pk) {
+    const list = sortPhotos(state.photoCache[pk] || []);
+    const pair = comparePair(pk);
+    let html = `<h2>תמונות לפני ואחרי <small>(${list.length})</small></h2>`;
+    if (pair) {
+      const cell = (p, tag) => `<button class="ba-cell" data-action="open-photo" data-id="${p.id}">
+          <img src="${p.data}" alt="${tag}">
+          <span class="ba-tag">${tag}</span>
+          <small>${fullShortDate(p.date)} · ${agoLabel(p.date)}</small>
+        </button>`;
+      html += `<div class="ba">${cell(pair.before, 'לפני')}${cell(pair.after, 'אחרי')}</div>
+        <button class="btn secondary" data-action="share-ba" style="margin-bottom:10px">${I.share}שליחת לפני/אחרי</button>`;
+    }
+    html += `<button class="btn" data-action="add-photos">${I.camera}הוספת תמונות</button>`;
+    if (!list.length) {
+      return html + `<p class="settings-note" style="margin:10px 0 0">כל תמונה נשמרת עם תאריך ההעלאה, כך שתמיד רואים מה הישנה ומה החדשה.</p>`;
+    }
+    if (pair) html += `<p class="settings-note" style="margin:10px 0 0">לחצי על תמונה כדי לבחור אותה כ"לפני" או כ"אחרי".</p>`;
+    const groups = [];
+    list.forEach((p) => {
+      const g = groups[groups.length - 1];
+      if (g && g.date === p.date) g.items.push(p); else groups.push({ date: p.date, items: [p] });
+    });
+    html += groups.map((g) => `
+      <h3 class="list-head">${fullShortDate(g.date)} <small>· ${agoLabel(g.date)}</small></h3>
+      <div class="photo-grid">${g.items.map((p) => {
+        const tag = pair && p.id === pair.before.id ? 'לפני' : pair && p.id === pair.after.id ? 'אחרי' : '';
+        return `<button class="photo-thumb${tag ? ' picked' : ''}" data-action="open-photo" data-id="${p.id}">
+          <img src="${p.data}" alt="" loading="lazy">${tag ? `<span>${tag}</span>` : ''}</button>`;
+      }).join('')}</div>`).join('');
+    return html;
+  }
+
+  function loadImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('bad image'));
+      img.src = src;
+    });
+  }
+
+  // מקטינים את התמונה כדי שהרבה תמונות ייכנסו בזיכרון הטלפון
+  async function compressImage(file, max = 1600) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = await loadImage(url);
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.naturalWidth * k);
+      cv.height = Math.round(img.naturalHeight * k);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      return cv.toDataURL('image/jpeg', 0.85);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function addPhotos(files) {
+    const c = currentClient();
+    if (!c || !files.length) return;
+    const pk = photoKey(c);
+    const list = await loadPhotos(pk);
+    toast(files.length > 1 ? `מעלה ${files.length} תמונות…` : 'מעלה תמונה…');
+    let added = 0;
+    for (const f of files) {
+      try {
+        const p = { id: uid(), clientKey: pk, clientName: c.name, date: today(), createdAt: Date.now(), data: await compressImage(f) };
+        await state.store.putPhoto(p);
+        list.push(p);
+        added++;
+      } catch (e) {
+        console.error(e);
+        toast(e && e.name === 'QuotaExceededError' ? 'אין מספיק מקום בטלפון לתמונה' : 'לא הצלחתי להעלות תמונה');
+      }
+    }
+    // תמונה חדשה הופכת אוטומטית ל"אחרי"
+    if (added && state.compare[pk]) delete state.compare[pk].after;
+    refreshPhotos();
+    if (added) toast(added > 1 ? `נוספו ${added} תמונות ✓` : 'התמונה נוספה ✓');
+  }
+
+  function findPhoto(id) {
+    for (const k of Object.keys(state.photoCache)) {
+      const p = state.photoCache[k].find((x) => x.id === id);
+      if (p) return p;
+    }
+    return null;
+  }
+
+  function openPhoto(id) {
+    const p = findPhoto(id);
+    if (!p) return;
+    const pair = comparePair(p.clientKey);
+    const role = pair && pair.before.id === p.id ? 'before' : pair && pair.after.id === p.id ? 'after' : '';
+    const many = (state.photoCache[p.clientKey] || []).length > 1;
     openSheet(`
       <div class="sheet-head">
         <button class="btn ghost" data-action="close-sheet">סגירה</button>
-        <h2>${c.contact ? 'איש קשר' : 'כרטיס לקוחה'}</h2>
+        <h2>${fullShortDate(p.date)}</h2>
         <span style="width:80px"></span>
       </div>
       <div class="sheet-body">
-        <div style="display:flex;gap:14px;align-items:center;margin-bottom:14px">
-          <span class="avatar big">${esc(initial(c.name))}</span>
-          <div><div style="font-size:22px;font-weight:800">${esc(c.name)}</div>
-            <div class="muted ltr">${esc(c.phone || 'אין טלפון')}</div></div>
+        <img class="photo-full" src="${p.data}" alt="">
+        <div class="field">
+          <label for="photoDate">תאריך התמונה</label>
+          <input id="photoDate" type="date" value="${p.date}" max="${today()}">
         </div>
-        ${intl ? `<div class="quick-contact" style="margin-bottom:14px">
-          <a class="btn secondary" href="tel:${esc(c.phone.replace(/[^\d+]/g, ''))}">${I.phone}חיוג</a>
-          <a class="btn wa" href="https://wa.me/${intl}" target="_blank" rel="noopener">${I.wa}וואטסאפ</a>
+        ${many ? `<div class="btn-row" style="margin-bottom:10px">
+          <button class="btn ${role === 'before' ? 'disabled' : 'secondary'}" data-action="photo-as" data-as="before" data-id="${p.id}">${role === 'before' ? I.check : ''}זו ה"לפני"</button>
+          <button class="btn ${role === 'after' ? 'disabled' : 'secondary'}" data-action="photo-as" data-as="after" data-id="${p.id}">${role === 'after' ? I.check : ''}זו ה"אחרי"</button>
         </div>` : ''}
-        ${c.contact ? '' : `<div class="stat-grid">
-          <div class="stat"><small>ביקורים</small><b>${c.visits}</b></div>
-          <div class="stat"><small>סכום כולל</small><b>${money(c.total)}</b></div>
-        </div>`}
-        <button class="btn" data-action="new-appt-client" data-key="${esc(c.key)}" style="margin-bottom:14px">${I.plus}טיפול חדש ל${esc(c.name)}</button>
-        ${c.contact ? '<div class="card empty">עוד לא היו טיפולים 🌸</div>' : `
-        <section class="card"><h2>היסטוריית טיפולים <small>(${hist.length})</small></h2>
-          ${hist.map((a) => `<button class="history-item" data-action="edit-appt" data-id="${a.id}">
-            <span class="hi-date"><b>${L.shortDate(a.date)}${a.date.slice(0, 4) === today().slice(0, 4) ? '' : '.' + a.date.slice(2, 4)}</b><small>${esc(a.time)}</small></span>
-            <span class="hi-main"><i class="dot" style="background:${apptColor(a)}"></i> ${esc(L.treatmentNames(a) || L.productNames(a))}${a.notes ? `<br><small class="muted">${esc(a.notes)}</small>` : ''}</span>
-            <span style="text-align:center"><span class="hi-price">${money(L.apptTotal(a))}</span><br><span class="pill ${a.status}">${L.statusLabel(a.status)}</span></span>
-          </button>`).join('')}
-        </section>`}
+        <button class="btn danger" data-action="del-photo" data-id="${p.id}">${I.trash}מחיקת התמונה</button>
       </div>`);
+    $('#photoDate').addEventListener('change', async (e) => {
+      if (!validDate(e.target.value)) return;
+      p.date = e.target.value;
+      await state.store.putPhoto(p);
+      $('#sheet .sheet-head h2').textContent = fullShortDate(p.date);
+      refreshPhotos();
+      toast('התאריך עודכן');
+    });
+  }
+
+  function setPhotoRole(id, role) {
+    const p = findPhoto(id);
+    if (!p) return;
+    const pair = comparePair(p.clientKey);
+    const sel = { before: pair.before.id, after: pair.after.id };
+    const other = role === 'before' ? 'after' : 'before';
+    if (sel[other] === id) sel[other] = sel[role]; // החלפה בין לפני לאחרי
+    sel[role] = id;
+    state.compare[p.clientKey] = sel;
+    closeSheet();
+    refreshPhotos();
+  }
+
+  async function deletePhoto(id) {
+    const p = findPhoto(id);
+    if (!p) return;
+    const ok = await ask({ title: 'למחוק את התמונה?', text: `תמונה מ-${fullShortDate(p.date)}. אי אפשר לשחזר אותה אחרי המחיקה.`, ok: 'מחיקה', danger: true });
+    if (!ok) return;
+    await state.store.deletePhoto(id);
+    state.photoCache[p.clientKey] = state.photoCache[p.clientKey].filter((x) => x.id !== id);
+    closeSheet();
+    refreshPhotos();
+    toast('התמונה נמחקה');
+  }
+
+  // תמונה אחת עם "לפני" מימין ו"אחרי" משמאל, לשליחה בוואטסאפ
+  async function shareBeforeAfter() {
+    const c = currentClient();
+    const pair = c && comparePair(photoKey(c));
+    if (!pair) return;
+    const W = 540, H = 675, BAR = 96;
+    const cv = document.createElement('canvas');
+    cv.width = W * 2;
+    cv.height = H + BAR;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#FAF4F0';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    const cells = [[pair.before, 'לפני', W], [pair.after, 'אחרי', 0]];
+    for (const [p, tag, x] of cells) {
+      const img = await loadImage(p.data);
+      const k = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+      const sw = W / k, sh = H / k;
+      ctx.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, x, 0, W, H);
+      ctx.direction = 'rtl';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#3A2A2F';
+      ctx.font = '800 38px -apple-system, "Arial Hebrew", Arial, sans-serif';
+      ctx.fillText(tag, x + W / 2, H + 46);
+      ctx.fillStyle = '#8A767C';
+      ctx.font = '500 24px -apple-system, "Arial Hebrew", Arial, sans-serif';
+      ctx.fillText(fullShortDate(p.date), x + W / 2, H + 80);
+    }
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(W - 2, 0, 4, H);
+    const blob = await new Promise((res) => cv.toBlob(res, 'image/jpeg', 0.9));
+    const file = new File([blob], 'before-after.jpg', { type: 'image/jpeg' });
+    try {
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file] });
+      } else {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `לפני ואחרי - ${c.name}.jpg`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        toast('התמונה נשמרה');
+      }
+    } catch (e) {
+      if (e && e.name !== 'AbortError') toast('השליחה לא הצליחה, נסי שוב');
+    }
+  }
+
+  /* ---------- הצהרות בריאות ---------- */
+  const formLink = (f) => new URL(`form.html?f=${encodeURIComponent(f.id)}`, location.href).href;
+  const declTitle = (d) => d.formTitle || (Forms.formById(d.formId) || {}).title || 'הצהרת בריאות';
+  const yesAnswers = (d) => (d.answers || []).filter((a) => a.yes);
+  const unseenDecls = () => state.decls.filter((d) => !d.seen).length;
+  const sortDecls = (list) => [...list].sort((a, b) => b.createdAt - a.createdAt);
+
+  function declMessage(f, name) {
+    const first = String(name || '').trim().split(/\s+/)[0];
+    return `${first ? `היי ${first}, ` : 'שלום, '}לפני הטיפול צריך למלא הצהרת בריאות. זה לוקח כמה דקות:\n${formLink(f)}\nתודה! ${state.settings.businessName}`;
+  }
+
+  function personForDecl(d) {
+    return findPerson(d.clientKey);
+  }
+
+  // כרטיס לקוחה: מתי נחתמה ההצהרה האחרונה לכל טופס
+  function clientDeclsHTML(c) {
+    const key = L.normName(c.name);
+    const intl = L.toIntlPhone(c.phone);
+    const rows = Forms.FORMS.map((f) => {
+      const s = L.declStatus(state.decls, key, f.id, today());
+      const send = intl
+        ? `<a class="btn wa small" href="${esc(L.waLink(c.phone, declMessage(f, c.name)))}" target="_blank" rel="noopener">${I.wa}שליחה בוואטסאפ</a>`
+        : `<button class="btn secondary small" data-action="decl-share" data-form="${f.id}">${I.share}שליחת קישור</button>`;
+      if (s.state === 'none') {
+        return `<div class="decl-status none"><div><b>${esc(f.title)}</b><small>עוד לא מילאה</small></div>${send}</div>`;
+      }
+      const yes = yesAnswers(s.last).length;
+      const open = `<button class="decl-open" data-action="open-decl" data-id="${esc(s.last.id)}">
+          <b>${esc(f.title)}</b>
+          <small>${s.state === 'expired' ? '⚠️ ' : '✓ '}נחתמה ב-${fullShortDate(s.last.date)} · ${agoLabel(s.last.date)}${yes ? ` · ${yes} תשובות "כן"` : ''}</small>
+        </button>`;
+      return s.state === 'expired'
+        ? `<div class="decl-status expired">${open}<p>עברה יותר משנה מאז החתימה. כדאי לשלוח הצהרה חדשה.</p>${send}</div>`
+        : `<div class="decl-status valid">${open}</div>`;
+    }).join('');
+    return `<section class="card"><h2>הצהרות בריאות</h2>${rows}</section>`;
+  }
+
+  function declRow(d) {
+    const yes = yesAnswers(d).length;
+    const name = (d.details && d.details.name) || d.clientKey;
+    return `<button class="client-row decl-row" data-action="open-decl" data-id="${esc(d.id)}">
+        <span class="avatar">${esc(initial(name))}</span>
+        <span class="cr-main"><b>${esc(name)}</b>
+          <span>${esc(declTitle(d))} · ${fullShortDate(d.date)}</span>
+          <span class="decl-chips">${d.seen ? '' : '<i class="chip-new">חדש</i>'}${d.matched ? '' : '<i class="chip-soft">לקוחה חדשה</i>'}${yes ? `<i class="chip-warn">${yes} תשובות "כן"</i>` : ''}</span>
+        </span>
+        <span class="cr-chev">${I.left}</span>
+      </button>`;
+  }
+
+  function cloudCardHTML() {
+    if (!Cloud.configured()) {
+      return `<section class="card notice"><h2>החיבור לענן עוד לא הוגדר</h2>
+        <p class="settings-note">כדי שהצהרות יגיעו לכאן אוטומטית צריך להגדיר פעם אחת את השירות של גוגל (Firebase). ההוראות נמצאות בקובץ README.</p></section>`;
+    }
+    if (!state.meta.cloud) {
+      return `<section class="card notice"><h2>התחברות לקבלת הצהרות</h2>
+        <p class="settings-note">מתחברים פעם אחת עם האימייל והסיסמה שנוצרו ב-Firebase. אחרי זה ההצהרות יגיעו לבד.</p>
+        <div class="field"><label for="cEmail">אימייל</label><input id="cEmail" type="email" class="ltr" autocomplete="username" inputmode="email"></div>
+        <div class="field"><label for="cPass">סיסמה</label><input id="cPass" type="password" class="ltr" autocomplete="current-password"></div>
+        <button class="btn" data-action="cloud-login">התחברות</button></section>`;
+    }
+    return '';
+  }
+
+  function viewDecls() {
+    const list = sortDecls(state.decls);
+    const sync = state.declSync;
+    const syncLine = !Cloud.configured() || !state.meta.cloud ? ''
+      : sync.error ? `<span class="warn">${esc(sync.error)}</span>`
+        : sync.at ? `עודכן ${new Date(sync.at).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })}` : 'בודק…';
+    return `
+      <div class="vhead"><div class="vhead-title"><h1>הצהרות</h1><p class="sub">שליחה ללקוחות וקבלת התשובות</p></div></div>
+      ${cloudCardHTML()}
+      <section class="card"><h2>טפסים לשליחה</h2>
+        ${Forms.FORMS.map((f) => `<div class="form-item">
+          <div class="form-item-title">${I.doc}<b>${esc(f.title)}</b></div>
+          <div class="form-item-actions">
+            <a class="btn wa small" href="https://wa.me/?text=${encodeURIComponent(declMessage(f, ''))}" target="_blank" rel="noopener">${I.wa}וואטסאפ</a>
+            <button class="btn secondary small" data-action="decl-copy" data-form="${f.id}">${I.copy}העתקה</button>
+            <a class="btn secondary small" href="${esc(formLink(f))}" target="_blank" rel="noopener">${I.eye}צפייה</a>
+          </div>
+        </div>`).join('')}
+        <p class="settings-note" style="margin:10px 0 0">אפשר לשלוח גם מכרטיס הלקוחה, ואז ההודעה נפתחת ישר בצ'אט שלה.</p>
+      </section>
+      <section class="card"><h2 class="h2-row"><span>הצהרות שהתקבלו <small>(${list.length})</small></span>
+        ${state.meta.cloud ? `<button class="icon-btn small" data-action="decl-refresh" aria-label="בדיקת הצהרות חדשות">${I.refresh}</button>` : ''}</h2>
+        ${syncLine ? `<p class="settings-note sync-line">${syncLine}</p>` : ''}
+        ${list.length ? list.map(declRow).join('') : '<p class="settings-note" style="margin:0">עוד לא התקבלו הצהרות. כשלקוחה תמלא את הטופס, ההצהרה תופיע כאן ובכרטיס שלה.</p>'}
+        ${state.meta.cloud ? `<p class="settings-note" style="margin:14px 0 0">מחוברת כ-<span class="ltr">${esc(state.meta.cloud.email)}</span> · <button class="link-btn" data-action="cloud-logout">התנתקות</button></p>` : ''}
+      </section>`;
+  }
+
+  function openDecl(id) {
+    const d = state.decls.find((x) => x.id === id);
+    if (!d) return;
+    if (!d.seen) {
+      d.seen = true;
+      state.store.putDeclaration(d);
+      updateBadges();
+    }
+    const det = d.details || {};
+    const yes = yesAnswers(d);
+    const form = Forms.formById(d.formId);
+    const person = personForDecl(d);
+    const kv = (lbl, v) => v ? `<div class="kv"><span>${lbl}</span><b>${esc(v)}</b></div>` : '';
+    const birth = /^\d{4}-\d{2}-\d{2}$/.test(det.birth || '') ? `${fullShortDate(det.birth)}${d.age != null ? ` (גיל ${d.age})` : ''}` : det.birth;
+    openSheet(`
+      <div class="sheet-head">
+        <button class="btn ghost" data-action="close-sheet">סגירה</button>
+        <h2>${esc(declTitle(d))}</h2>
+        <span style="width:80px"></span>
+      </div>
+      <div class="sheet-body">
+        <div class="client-head">
+          <span class="avatar big">${esc(initial(det.name))}</span>
+          <div><h1>${esc(det.name || '')}</h1><div class="muted">נחתמה ב-${fullShortDate(d.date)} · ${agoLabel(d.date)}</div></div>
+        </div>
+        ${yes.length ? `<section class="card yes-card"><h2>${yes.length} תשובות "כן" — כדאי לעבור עליהן</h2>
+          ${yes.map((a) => `<div class="ans yes"><p>${esc(a.q)}</p>${a.details ? `<b>${esc(a.details)}</b>` : ''}</div>`).join('')}
+        </section>` : '<div class="card ok-card">✓ כל התשובות בשאלון הרפואי הן "לא"</div>'}
+        <section class="card"><h2>פרטים אישיים</h2>
+          ${kv('תעודת זהות', det.idNum)}${kv('תאריך לידה', birth)}${kv('מצב משפחתי', det.marital)}
+          ${kv('טלפון נייד', det.phone)}${kv('טלפון נוסף', det.phone2)}${kv('כתובת', det.address)}${kv('דוא״ל', det.email)}
+        </section>
+        <section class="card"><h2>שאלון רפואי</h2>
+          ${(d.answers || []).map((a, i) => `<div class="ans ${a.yes ? 'yes' : ''}">
+            <p>${i + 1}. ${esc(a.q)}</p><span class="ans-val">${a.yes ? 'כן' : 'לא'}</span>${a.yes && a.details ? `<b>${esc(a.details)}</b>` : ''}
+          </div>`).join('')}
+        </section>
+        <section class="card"><h2>הצהרה והסכמה</h2>
+          <p class="ok-line">✓ אישרה את הצהרת הבריאות</p>
+          <p class="ok-line">✓ אישרה את טופס ההסכמה לטיפול</p>
+          ${form ? `<details class="howto"><summary>הנוסח המלא שאושר</summary>
+            <p><b>${esc(form.health.title)}</b><br>${esc(form.health.intro)}</p><ol class="legal">${form.health.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+            <p><b>${esc(form.consent.title)}</b></p><ol class="legal">${form.consent.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+          </details>` : ''}
+        </section>
+        <section class="card"><h2>חתימה</h2>
+          ${d.signature ? `<img class="sig-img" src="${d.signature}" alt="חתימה">` : ''}
+          ${d.guardian ? `<h3 class="list-head" style="margin-inline:0">הורה / אפוטרופוס</h3>
+            ${kv('שם', d.guardian.name)}${kv('קרבה', d.guardian.relation)}
+            ${d.guardian.signature ? `<img class="sig-img" src="${d.guardian.signature}" alt="חתימת אפוטרופוס">` : ''}` : ''}
+        </section>
+        ${person
+          ? `<button class="btn" data-action="decl-client" data-key="${esc(person.key)}" style="margin-bottom:10px">${I.users}כרטיס הלקוחה: ${esc(person.name)}</button>`
+          : `<button class="btn" data-action="decl-new-appt" data-id="${esc(d.id)}" style="margin-bottom:10px">${I.plus}טיפול חדש ל${esc(det.name || '')}</button>`}
+        <button class="btn secondary" data-action="decl-assign" data-id="${esc(d.id)}" style="margin-bottom:10px">${I.users}${person ? 'שיוך ללקוחה אחרת' : 'שיוך ללקוחה קיימת'}</button>
+        <button class="btn danger" data-action="del-decl" data-id="${esc(d.id)}">${I.trash}מחיקת ההצהרה</button>
+      </div>`);
+  }
+
+  // בחירת לקוחה ידנית, כשהטלפון בהצהרה לא תאם
+  function openAssign(id) {
+    const d = state.decls.find((x) => x.id === id);
+    if (!d) return;
+    const { clients, contacts } = peopleIndex();
+    const people = clients.concat(contacts);
+    const rows = (q) => {
+      const found = L.searchClients(people, q).slice(0, 60);
+      return found.length ? found.map((c) => `<button class="client-row" data-action="assign-decl" data-id="${esc(d.id)}" data-name="${esc(c.name)}">
+          <span class="avatar ${c.contact ? 'soft' : ''}">${esc(initial(c.name))}</span>
+          <span class="cr-main"><b>${esc(c.name)}</b><span class="phone">${esc(c.phone || '')}</span></span>
+        </button>`).join('') : '<div class="card empty">לא נמצאה לקוחה בשם הזה</div>';
+    };
+    openSheet(`
+      <div class="sheet-head">
+        <button class="btn ghost" data-action="open-decl" data-id="${esc(d.id)}">חזרה</button>
+        <h2>שיוך ללקוחה</h2>
+        <span style="width:80px"></span>
+      </div>
+      <div class="sheet-body">
+        <p class="settings-note">ההצהרה של ${esc((d.details && d.details.name) || '')} (${esc((d.details && d.details.phone) || '')}). למי לשייך אותה?</p>
+        <div class="search">${I.search}<input id="assignSearch" type="search" placeholder="חיפוש לפי שם או טלפון" autocomplete="off"></div>
+        <div id="assignList">${rows('')}</div>
+      </div>`);
+    $('#assignSearch').addEventListener('input', (e) => { $('#assignList').innerHTML = rows(e.target.value); });
+  }
+
+  async function assignDecl(id, name) {
+    const d = state.decls.find((x) => x.id === id);
+    if (!d) return;
+    d.clientKey = L.normName(name);
+    d.matched = true;
+    await state.store.putDeclaration(d);
+    toast(`ההצהרה שויכה ל${name} ✓`);
+    openDecl(id);
+    render();
+  }
+
+  async function deleteDecl(id) {
+    const d = state.decls.find((x) => x.id === id);
+    if (!d) return;
+    const ok = await ask({ title: 'למחוק את ההצהרה?', text: `ההצהרה של ${(d.details && d.details.name) || ''} מ-${fullShortDate(d.date)}. אי אפשר לשחזר אותה אחרי המחיקה.`, ok: 'מחיקה', danger: true });
+    if (!ok) return;
+    await state.store.deleteDeclaration(id);
+    state.decls = state.decls.filter((x) => x.id !== id);
+    closeSheet();
+    render();
+    toast('ההצהרה נמחקה');
+  }
+
+  async function copyFormLink(id) {
+    const f = Forms.formById(id);
+    if (!f) return;
+    try {
+      await navigator.clipboard.writeText(formLink(f));
+      toast('הקישור הועתק ✓');
+    } catch (e) {
+      await ask({ title: 'הקישור לטופס', text: formLink(f), ok: 'סגירה', cancel: '' });
+    }
+  }
+
+  async function shareFormLink(id) {
+    const f = Forms.formById(id);
+    if (!f) return;
+    try {
+      if (navigator.share) await navigator.share({ text: declMessage(f, state.clientName) });
+      else await copyFormLink(id);
+    } catch (e) { /* בוטל */ }
+  }
+
+  /* ---------- קבלת הצהרות מהענן ---------- */
+  let cloudToken = { idToken: '', expiresAt: 0 };
+
+  function declFromDoc(doc) {
+    const p = doc.payload;
+    if (!p || !p.details || !Array.isArray(p.answers)) return null;
+    const { clients, contacts } = peopleIndex();
+    const people = clients.concat(contacts);
+    const byPhone = L.matchByPhone(people, p.details.phone);
+    const byName = !byPhone && people.find((x) => L.normName(x.name) === L.normName(p.details.name));
+    const person = byPhone || byName;
+    return {
+      id: doc.id,
+      formId: doc.formId || p.formId || '',
+      formTitle: p.formTitle || '',
+      createdAt: doc.createdAt,
+      date: L.todayStr(new Date(doc.createdAt)),
+      clientKey: L.normName(person ? person.name : p.details.name),
+      matched: !!person,
+      seen: false,
+      details: p.details,
+      age: p.age == null ? null : p.age,
+      answers: p.answers,
+      signature: typeof p.signature === 'string' ? p.signature : '',
+      guardian: p.guardian || null,
+    };
+  }
+
+  let syncing = null;
+  function syncDecls(loud = false) {
+    if (!Cloud.configured() || !state.meta.cloud) return Promise.resolve();
+    if (!syncing) syncing = doSync(loud).finally(() => { syncing = null; });
+    return syncing;
+  }
+
+  async function doSync(loud) {
+    let added = [];
+    try {
+      const session = await Cloud.fresh({ ...state.meta.cloud, ...cloudToken });
+      cloudToken = { idToken: session.idToken, expiresAt: session.expiresAt };
+      if (session.refreshToken !== state.meta.cloud.refreshToken) {
+        state.meta.cloud = { ...state.meta.cloud, refreshToken: session.refreshToken };
+        await saveMeta();
+      }
+      const docs = await Cloud.list(session);
+      for (const doc of docs) {
+        if (!state.decls.some((d) => d.id === doc.id)) {
+          const rec = declFromDoc(doc);
+          if (!rec) continue; // פגום — משאירים בענן
+          await state.store.putDeclaration(rec);
+          state.decls.push(rec);
+          added.push(rec);
+        }
+        // נשמר בטלפון, אז אפשר למחוק מהענן
+        await Cloud.remove(session, doc.name);
+      }
+      state.declSync = { at: Date.now(), error: '' };
+      if (added.length) {
+        toast(added.length === 1 ? `התקבלה הצהרה מ${added[0].details.name} ✓` : `התקבלו ${added.length} הצהרות חדשות ✓`);
+      } else if (loud) {
+        toast('אין הצהרות חדשות');
+      }
+    } catch (e) {
+      console.warn('sync', e);
+      if (e.auth) {
+        state.meta.cloud = null;
+        cloudToken = { idToken: '', expiresAt: 0 };
+        await saveMeta();
+        state.declSync = { at: 0, error: 'צריך להתחבר מחדש' };
+      } else {
+        state.declSync = { ...state.declSync, error: 'אין חיבור לאינטרנט, ננסה שוב בפעם הבאה' };
+      }
+      if (loud) toast(state.declSync.error);
+    }
+    if (!sheetOpen() && (added.length || state.view === 'decls' || state.view === 'client')) render();
+    else updateBadges();
+  }
+
+  async function cloudLogin() {
+    const email = $('#cEmail').value.trim();
+    const pass = $('#cPass').value;
+    if (!email || !pass) { toast('צריך למלא אימייל וסיסמה'); return; }
+    try {
+      const s = await Cloud.signIn(email, pass);
+      state.meta.cloud = { uid: s.uid, email: s.email, refreshToken: s.refreshToken };
+      cloudToken = { idToken: s.idToken, expiresAt: s.expiresAt };
+      state.declSync = { at: 0, error: '' };
+      await saveMeta();
+      toast('התחברת ✓');
+      render();
+      syncDecls(true);
+    } catch (e) {
+      const m = String(e.message || '');
+      toast(/INVALID|EMAIL_NOT_FOUND|PASSWORD/.test(m) ? 'האימייל או הסיסמה לא נכונים' : 'לא הצלחתי להתחבר, בדקי את האינטרנט');
+    }
+  }
+
+  async function cloudLogout() {
+    const ok = await ask({ title: 'להתנתק?', text: 'הצהרות חדשות לא יגיעו עד שתתחברי שוב. ההצהרות שכבר התקבלו נשארות.', ok: 'התנתקות' });
+    if (!ok) return;
+    state.meta.cloud = null;
+    cloudToken = { idToken: '', expiresAt: 0 };
+    await saveMeta();
+    render();
   }
 
   /* ---------- מחירון ---------- */
@@ -1764,7 +2365,7 @@
   }
 
   /* ---------- גיבוי ---------- */
-  function backupPayload() {
+  async function backupPayload() {
     return {
       app: 'sima-calendar',
       version: 1,
@@ -1772,11 +2373,13 @@
       appointments: state.appts,
       settings: state.settings,
       contacts: state.contacts,
+      photos: await state.store.getAllPhotos(),
+      declarations: state.decls,
     };
   }
 
   async function exportBackup() {
-    const json = JSON.stringify(backupPayload(), null, 2);
+    const json = JSON.stringify(await backupPayload());
     const name = `sima-backup-${today()}.json`;
     const file = new File([json], name, { type: 'application/json' });
     const touch = navigator.maxTouchPoints > 0;
@@ -1836,7 +2439,21 @@
     const contacts = Array.isArray(data.contacts)
       ? data.contacts.filter((c) => c && c.name && c.phone).map((c) => ({ name: String(c.name), phone: String(c.phone) }))
       : null;
-    return { appointments: appts, settings, contacts };
+    const photos = Array.isArray(data.photos)
+      ? data.photos.filter((p) => p && p.clientKey && validDate(p.date) && /^data:image\//.test(p.data)).map((p) => ({
+        id: String(p.id || uid()),
+        clientKey: String(p.clientKey),
+        clientName: String(p.clientName || ''),
+        date: p.date,
+        createdAt: Number(p.createdAt) || Date.now(),
+        data: p.data,
+      }))
+      : null;
+    const declarations = Array.isArray(data.declarations)
+      ? data.declarations.filter((d) => d && d.id && d.details && Array.isArray(d.answers) && validDate(d.date))
+        .map((d) => ({ ...d, id: String(d.id), clientKey: String(d.clientKey || L.normName(d.details.name)), createdAt: Number(d.createdAt) || Date.now() }))
+      : null;
+    return { appointments: appts, settings, contacts, photos, declarations };
   }
 
   async function importBackup(file) {
@@ -1849,7 +2466,7 @@
     }
     const ok = await ask({
       title: 'לשחזר מהגיבוי?',
-      text: `בגיבוי יש ${parsed.appointments.length} טיפולים.\nהנתונים הנוכחיים (${state.appts.length} טיפולים) יוחלפו בנתונים מהגיבוי.`,
+      text: `בגיבוי יש ${parsed.appointments.length} טיפולים${parsed.photos && parsed.photos.length ? ` ו-${parsed.photos.length} תמונות` : ''}.\nהנתונים הנוכחיים (${state.appts.length} טיפולים) יוחלפו בנתונים מהגיבוי.`,
       ok: 'כן, לשחזר', cancel: 'ביטול', danger: true,
     });
     if (!ok) return;
@@ -1859,6 +2476,15 @@
     if (parsed.contacts) {
       state.contacts = parsed.contacts;
       await state.store.setKV('contacts', state.contacts);
+    }
+    if (parsed.declarations) {
+      await state.store.replaceDeclarations(parsed.declarations);
+      state.decls = parsed.declarations;
+    }
+    if (parsed.photos) {
+      await state.store.replacePhotos(parsed.photos);
+      state.photoCache = {};
+      state.compare = {};
     }
     toast(`שוחזרו ${state.appts.length} טיפולים ✓`);
     render();
@@ -1910,10 +2536,10 @@
     window.scrollTo(0, 0);
   }
 
-  const TAB_OF = { calendar: 'calendar', day: 'calendar', reminders: 'reminders', summary: 'summary', clients: 'clients', prices: 'prices', settings: 'calendar' };
+  const TAB_OF = { calendar: 'calendar', day: 'calendar', reminders: 'reminders', summary: 'summary', clients: 'clients', client: 'clients', decls: 'decls', prices: 'prices', settings: 'calendar' };
 
   function render() {
-    const views = { calendar: viewCalendar, day: viewDay, reminders: viewReminders, summary: viewSummary, clients: viewClients, prices: viewPrices, settings: viewSettings };
+    const views = { calendar: viewCalendar, day: viewDay, reminders: viewReminders, summary: viewSummary, clients: viewClients, client: viewClient, decls: viewDecls, prices: viewPrices, settings: viewSettings };
     $('#view').innerHTML = views[state.view]();
     const tab = TAB_OF[state.view];
     $$('.tab').forEach((t) => {
@@ -1922,15 +2548,33 @@
       if (on) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
     });
     $('#fab').hidden = !['calendar', 'day', 'clients'].includes(state.view);
+    updateBadges();
+    afterRender();
+  }
+
+  function updateBadges() {
     const r = L.reminderStatus(state.appts, tomorrow());
     const badge = $('#remBadge');
     badge.hidden = !r.needAttention;
     badge.textContent = r.needAttention;
-    afterRender();
+    const n = unseenDecls();
+    const db = $('#declBadge');
+    db.hidden = !n;
+    db.textContent = n;
   }
 
   let tplTimer;
   function afterRender() {
+    if (state.view === 'client') {
+      const c = currentClient();
+      const pk = c && photoKey(c);
+      if (pk && !state.photoCache[pk]) {
+        loadPhotos(pk).then(refreshPhotos).catch((e) => {
+          console.error(e);
+          $('#photoArea') && ($('#photoArea').innerHTML = '<h2>תמונות לפני ואחרי</h2><p class="settings-note">לא הצלחתי לטעון את התמונות</p>');
+        });
+      }
+    }
     if (state.view === 'clients') {
       const inp = $('#clientSearch');
       inp.addEventListener('input', () => {
@@ -2038,6 +2682,7 @@
       if (t === 'reminders') state.remDay = null;
       if (t === 'calendar') state.month = state.view === 'calendar' ? L.monthStart(today()) : state.month;
       go(t);
+      if (t === 'decls') syncDecls();
     },
     'share-prices': () => openPriceShare(),
     'price-gender': (el) => { state.priceMen = !!el.dataset.men; render(); },
@@ -2204,6 +2849,27 @@
     'sum-week': (el) => { state.sumTab = 'week'; state.sumDate = el.dataset.date; go('summary'); },
     'sum-month': (el) => { state.sumTab = 'month'; state.sumDate = el.dataset.date; go('summary'); },
     'open-client': (el) => openClient(el.dataset.key),
+    'back-client': () => go(state.clientBack && state.clientBack !== 'client' ? state.clientBack : 'clients'),
+    'add-photos': () => { $('#photoFile').value = ''; $('#photoFile').click(); },
+    'open-photo': (el) => openPhoto(el.dataset.id),
+    'photo-as': (el) => setPhotoRole(el.dataset.id, el.dataset.as),
+    'del-photo': (el) => deletePhoto(el.dataset.id),
+    'share-ba': () => shareBeforeAfter(),
+    'open-decl': (el) => openDecl(el.dataset.id),
+    'decl-assign': (el) => openAssign(el.dataset.id),
+    'assign-decl': (el) => assignDecl(el.dataset.id, el.dataset.name),
+    'del-decl': (el) => deleteDecl(el.dataset.id),
+    'decl-client': (el) => { closeSheet(); openClient(el.dataset.key); },
+    'decl-new-appt': (el) => {
+      const d = state.decls.find((x) => x.id === el.dataset.id);
+      if (!d) return;
+      openApptForm(newForm({ clientName: d.details.name, phone: d.details.phone }));
+    },
+    'decl-copy': (el) => copyFormLink(el.dataset.form),
+    'decl-share': (el) => shareFormLink(el.dataset.form),
+    'decl-refresh': () => syncDecls(true),
+    'cloud-login': () => cloudLogin(),
+    'cloud-logout': () => cloudLogout(),
     'client-filter': (el) => { state.clientFilter = el.dataset.f; $('#clientList').innerHTML = clientListHTML(); },
     'add-type': async () => {
       state.settings.treatmentTypes.push({ id: 't-' + uid(), name: '', price: 0, duration: 30, color: nextFreeColor(), subs: [] });
@@ -2296,7 +2962,7 @@
 
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-action]');
-    if (!el) return;
+    if (!el || !state.settings) return; // עוד בטעינה
     const fn = actions[el.dataset.action];
     if (!fn) return;
     // קישורים (וואטסאפ) ממשיכים להיפתח כרגיל
@@ -2313,6 +2979,11 @@
     if (f) importContacts(f);
   });
 
+  $('#photoFile').addEventListener('change', (e) => {
+    const files = [...(e.target.files || [])];
+    if (files.length) addPhotos(files);
+  });
+
   $('#importFile').addEventListener('change', (e) => {
     const f = e.target.files && e.target.files[0];
     if (f) importBackup(f);
@@ -2321,7 +2992,7 @@
   // כשחוזרים לאפליקציה (למשל למחרת) — לרענן את "היום" ו"מחר"
   let lastDay = today();
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible') return;
+    if (document.visibilityState !== 'visible' || !state.settings) return;
     if (today() !== lastDay) {
       if (state.day === lastDay) state.day = today();
       if (state.sumDate === lastDay) state.sumDate = today();
@@ -2329,6 +3000,7 @@
       lastDay = today();
     }
     if (!sheetOpen()) render();
+    syncDecls();
   });
 
   /* ---------- הפעלה ---------- */
@@ -2342,8 +3014,10 @@
     state.settings = normalizeSettings(Object.assign(JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), data.settings || {}));
     state.meta = data.meta || {};
     state.contacts = Array.isArray(data.contacts) ? data.contacts : [];
+    state.decls = await state.store.getDeclarations();
     await saveSettings();
     render();
+    syncDecls();
 
     DB.requestPersistence();
     // בפיתוח מקומי בלי מטמון, כדי ששינויים ייראו מיד (אפשר לבדוק אופליין עם ?sw=1)

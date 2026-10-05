@@ -12,6 +12,7 @@
   const MINOR_AGE = 16;
   const form = Forms.formById(new URLSearchParams(location.search).get('f'));
   const root = $('#form');
+  const preview = new URLSearchParams(location.search).get('preview') === '1'; // צפייה של סימה מהאפליקציה: בלי שליחה
 
   let toastTimer;
   function toast(msg) {
@@ -64,6 +65,7 @@
 
   function render() {
     root.innerHTML = `
+      ${preview ? `<div class="preview-bar"><a class="back-btn" href="./">${'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>'}<span>חזרה לאפליקציה</span></a><span>תצוגה בלבד, ההצהרה לא תישלח</span></div>` : ''}
       <header class="form-head">
         <p class="form-biz">${esc(Forms.BUSINESS)}</p>
         <h1>${esc(form.title)}</h1>
@@ -286,6 +288,7 @@
   let sending = false;
   async function send() {
     if (sending) return;
+    if (preview) { toast('זו תצוגה בלבד, ההצהרה לא נשלחת'); return; }
     const bad = validate();
     if (bad.length) {
       bad[0].scrollIntoView({ behavior: 'smooth', block: 'center' });

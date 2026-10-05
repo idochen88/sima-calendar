@@ -1052,7 +1052,7 @@
           <div class="form-item-actions">
             <a class="btn wa small" href="https://wa.me/?text=${encodeURIComponent(declMessage(f, ''))}" target="_blank" rel="noopener">${I.wa}וואטסאפ</a>
             <button class="btn secondary small" data-action="decl-copy" data-form="${f.id}">${I.copy}העתקה</button>
-            <a class="btn secondary small" href="${esc(formLink(f))}" target="_blank" rel="noopener">${I.eye}צפייה</a>
+            <a class="btn secondary small" href="${esc(formLink(f) + '&preview=1')}">${I.eye}צפייה</a>
           </div>
         </div>`).join('')}
         <p class="settings-note" style="margin:10px 0 0">אפשר לשלוח גם מכרטיס הלקוחה, ואז ההודעה נפתחת ישר בצ'אט שלה.</p>

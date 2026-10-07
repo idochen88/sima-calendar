@@ -974,3 +974,23 @@ ol.legal li { margin-bottom: 6px; }
   border-bottom: 1px solid var(--line); font-size: 13px; color: var(--muted);
 }
 .preview-bar .back-btn { text-decoration: none; font-size: 15px; }
+
+/* ---------- טפסים: תיבות סימון, טקסט חופשי ---------- */
+.chk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 10px; }
+.chk-item.wide { grid-column: 1 / -1; }
+.chk {
+  display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 12px;
+  border: 1.5px solid var(--line); border-radius: 12px; background: var(--surface); font-weight: 600; font-size: 15px;
+}
+.chk input { width: 22px; height: 22px; flex: none; margin: 0; accent-color: var(--rose); }
+.chk:has(input:checked) { background: var(--rose-soft); border-color: var(--rose); color: var(--rose-dark); }
+.chk-item .q-details { margin-top: 6px; }
+.field textarea.q-text-input { min-height: 70px; }
+.field textarea.q-text-input.invalid { border-color: var(--red); background: #FFF8F8; }
+.check-row.soft { background: var(--surface); border: 1.5px solid var(--line); font-weight: 600; margin-bottom: 8px; }
+.legal-p { font-size: 14px; line-height: 1.55; color: #5a464b; margin: 8px 0; }
+.ok-line.no { color: var(--muted); font-weight: 500; }
+.ticked { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 10px; }
+.tick { background: var(--orange-soft); color: #9a5a12; font-weight: 600; font-size: 14px; padding: 3px 10px; border-radius: 10px; }
+.ans .txt { color: var(--text); font-weight: 600; }
+.ans small { color: var(--muted); }

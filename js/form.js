@@ -1,6 +1,7 @@
 /*
- * דף הצהרת הבריאות שהלקוחה ממלאת מהקישור (form.html?f=hair).
+ * דף ההצהרה שהלקוחה ממלאת מהקישור (form.html?f=hair / face / pm).
  * בסיום ההצהרה נשלחת ל"תיבת הדואר" בענן, והאפליקציה של סימה אוספת אותה משם.
+ * מבנה הטפסים מוגדר ב-forms.js.
  */
 (function () {
   'use strict';
@@ -9,10 +10,10 @@
   const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const MINOR_AGE = 16;
-  const form = Forms.formById(new URLSearchParams(location.search).get('f'));
+  const params = new URLSearchParams(location.search);
+  const form = Forms.formById(params.get('f'));
   const root = $('#form');
-  const preview = new URLSearchParams(location.search).get('preview') === '1'; // צפייה של סימה מהאפליקציה: בלי שליחה
+  const preview = params.get('preview') === '1'; // צפייה של סימה מהאפליקציה: בלי שליחה
 
   let toastTimer;
   function toast(msg) {
@@ -29,19 +30,41 @@
   }
   document.title = form.title;
 
+  /* ---------- שדות הפרטים האישיים ---------- */
+  const FIELDS = {
+    name: { label: 'שם ושם משפחה', req: true, attrs: 'autocomplete="name"' },
+    idNum: { label: 'תעודת זהות', req: true, attrs: 'inputmode="numeric" autocomplete="off" class="ltr"' },
+    birth: { label: 'תאריך לידה', req: true, type: 'date', attrs: 'class="ltr"' },
+    marital: { label: 'מצב משפחתי', seg: ['נשוי/אה', 'רווק/ה'] },
+    phone: { label: 'טלפון נייד', req: true, type: 'tel', attrs: 'inputmode="tel" autocomplete="tel" class="ltr"' },
+    phone2: { label: 'טלפון נוסף', type: 'tel', attrs: 'inputmode="tel" class="ltr"' },
+    address: { label: 'כתובת', attrs: 'autocomplete="street-address"' },
+    email: { label: 'דוא״ל', type: 'email', attrs: 'inputmode="email" autocomplete="email" class="ltr"' },
+    job: { label: 'מקצוע' },
+    height: { label: 'גובה (ס״מ)', attrs: 'inputmode="numeric" class="ltr"' },
+    weight: { label: 'משקל (ק״ג)', attrs: 'inputmode="decimal" class="ltr"' },
+  };
+
+  /* ---------- השאלון כרשימה שטוחה אחת ---------- */
+  const ITEMS = [];
+  form.sections.forEach((sec, si) => sec.items.forEach((it) => ITEMS.push({ ...it, si, sec })));
+  const guardianAge = form.guardianAge || 0;
+
   /* ---------- מצב, כולל טיוטה שנשמרת בטלפון של הלקוחה ---------- */
   const DRAFT_KEY = 'sima-form-draft-' + form.id;
   const blank = () => ({
-    details: { name: '', idNum: '', birth: '', marital: '', address: '', email: '', phone: '', phone2: '' },
-    answers: form.questions.map(() => ({ yes: null, details: '' })),
-    healthOk: false,
-    consentOk: false,
+    details: Object.fromEntries(Object.keys(FIELDS).map((k) => [k, ''])),
+    answers: ITEMS.map(() => ({ yes: null, details: '', text: '' })),
+    agree: {},
+    opts: (form.options ? form.options.items : []).map(() => false),
     guardian: { name: '', relation: '' },
   });
   let st = blank();
   try {
     const d = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null');
-    if (d && d.answers && d.answers.length === form.questions.length) st = { ...st, ...d, details: { ...st.details, ...d.details }, guardian: { ...st.guardian, ...d.guardian } };
+    if (d && d.answers && d.answers.length === ITEMS.length) {
+      st = { ...st, ...d, details: { ...st.details, ...d.details }, guardian: { ...st.guardian, ...d.guardian } };
+    }
   } catch (e) { /* אין טיוטה */ }
   const saveDraft = () => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(st)); } catch (e) { /* לא חשוב */ } };
   const clearDraft = () => { try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* לא חשוב */ } };
@@ -54,14 +77,74 @@
     if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age--;
     return age >= 0 && age < 120 ? age : null;
   }
-  const isMinor = () => { const a = ageFrom(st.details.birth); return a != null && a < MINOR_AGE; };
+  const isMinor = () => { const a = ageFrom(st.details.birth); return !!guardianAge && a != null && a < guardianAge; };
+
+  // האם שדה הפירוט של פריט מוצג כרגע
+  function detailShown(it, a) {
+    if (!it.detail) return false;
+    if (it.k === 'check') return a.yes === true;
+    return it.detailWhen === 'no' ? a.yes === false : a.yes === true;
+  }
 
   /* ---------- תצוגה ---------- */
-  const field = (key, label, type = 'text', extra = '') => `
-    <div class="field">
-      <label for="d-${key}">${label}</label>
-      <input id="d-${key}" type="${type}" data-detail="${key}" value="${esc(st.details[key])}" ${extra}>
-    </div>`;
+  function fieldHTML(key) {
+    const f = FIELDS[key];
+    if (f.seg) {
+      return `<div class="field"><span class="field-label">${f.label}</span>
+        <div class="seg-tabs two" id="${key}">${f.seg.map((m) => `<button type="button" data-seg="${key}" data-v="${m}" class="${st.details[key] === m ? 'on' : ''}" aria-pressed="${st.details[key] === m}">${m}</button>`).join('')}</div></div>`;
+    }
+    return `<div class="field"><label for="d-${key}">${f.label}${f.req ? ' *' : ''}</label>
+      <input id="d-${key}" type="${f.type || 'text'}" data-detail="${key}" value="${esc(st.details[key])}" ${f.attrs || ''}></div>`;
+  }
+
+  function detailHTML(it, a, i) {
+    return `<textarea class="q-details" data-qd="${i}" placeholder="${esc(it.placeholder || 'פרט/י')}" ${detailShown(it, a) ? '' : 'hidden'}>${esc(a.details)}</textarea>`;
+  }
+
+  function itemHTML(it, i, num) {
+    const a = st.answers[i];
+    if (it.k === 'yn') {
+      return `<div class="q" data-q="${i}">
+        <p class="q-text">${num ? `<b>${num}.</b> ` : ''}${esc(it.q)}</p>
+        <div class="yn">
+          <button type="button" data-yn="1" class="${a.yes === true ? 'on yes' : ''}" aria-pressed="${a.yes === true}">כן</button>
+          <button type="button" data-yn="0" class="${a.yes === false ? 'on' : ''}" aria-pressed="${a.yes === false}">לא</button>
+        </div>${detailHTML(it, a, i)}</div>`;
+    }
+    if (it.k === 'check') {
+      return `<div class="chk-item${it.detail || it.q.length > 22 ? ' wide' : ''}" data-q="${i}">
+        <label class="chk"><input type="checkbox" data-ck="${i}" ${a.yes ? 'checked' : ''}><span>${esc(it.q)}</span></label>
+        ${detailHTML(it, a, i)}</div>`;
+    }
+    return `<div class="field" data-q="${i}"><label for="t-${i}">${esc(it.q)}${it.required ? ' *' : ''}</label>
+      <textarea id="t-${i}" class="q-text-input" data-qt="${i}">${esc(a.text)}</textarea></div>`;
+  }
+
+  function sectionHTML(sec, si) {
+    let n = 0;
+    let html = '';
+    let checks = [];
+    const flush = () => { if (checks.length) { html += `<div class="chk-grid">${checks.join('')}</div>`; checks = []; } };
+    ITEMS.forEach((it, i) => {
+      if (it.si !== si) return;
+      if (it.k === 'check') { checks.push(itemHTML(it, i)); return; }
+      flush();
+      html += itemHTML(it, i, sec.numbered && it.k === 'yn' ? ++n : 0);
+    });
+    flush();
+    return `<section class="card" id="sec-${si}"><h2>${esc(sec.title)}</h2>${sec.note ? `<p class="settings-note">${esc(sec.note)}</p>` : ''}${html}</section>`;
+  }
+
+  function agreementHTML(ag) {
+    return `<section class="card" id="sec-ag-${ag.key}">
+      <h2>${esc(ag.title)}</h2>
+      ${ag.intro ? `<p>${esc(ag.intro)}</p>` : ''}
+      ${ag.items ? `<ol class="legal">${ag.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
+      ${(ag.text || []).map((t) => `<p class="legal-p">${esc(t)}</p>`).join('')}
+      ${ag.footnote ? `<p class="settings-note">${esc(ag.footnote)}</p>` : ''}
+      <label class="check-row"><input type="checkbox" data-agree="${ag.key}" ${st.agree[ag.key] ? 'checked' : ''}><span>${esc(ag.confirm)}</span></label>
+    </section>`;
+  }
 
   function render() {
     root.innerHTML = `
@@ -69,59 +152,26 @@
       <header class="form-head">
         <p class="form-biz">${esc(Forms.BUSINESS)}</p>
         <h1>${esc(form.title)}</h1>
-        <p class="sub">יש למלא את כל הפרטים, לענות על השאלות ולחתום בסוף. זה לוקח כמה דקות, והפרטים נשמרים גם אם יוצאים מהדף באמצע.</p>
+        <p class="sub">יש למלא את הפרטים, לענות על השאלות ולחתום בסוף. זה לוקח כמה דקות, והפרטים נשמרים גם אם יוצאים מהדף באמצע.</p>
       </header>
 
       <section class="card" id="sec-details">
         <h2>פרטים אישיים</h2>
-        ${field('name', 'שם ושם משפחה *', 'text', 'autocomplete="name"')}
-        ${field('idNum', 'תעודת זהות *', 'text', 'inputmode="numeric" autocomplete="off" class="ltr"')}
-        ${field('birth', 'תאריך לידה *', 'date', 'class="ltr"')}
-        <div class="field">
-          <span class="field-label">מצב משפחתי</span>
-          <div class="seg-tabs two" id="marital">
-            ${['נשוי/אה', 'רווק/ה'].map((m) => `<button type="button" data-marital="${m}" class="${st.details.marital === m ? 'on' : ''}" aria-pressed="${st.details.marital === m}">${m}</button>`).join('')}
-          </div>
-        </div>
-        ${field('phone', 'טלפון נייד *', 'tel', 'inputmode="tel" autocomplete="tel" class="ltr"')}
-        ${field('phone2', 'טלפון נוסף', 'tel', 'inputmode="tel" class="ltr"')}
-        ${field('address', 'כתובת', 'text', 'autocomplete="street-address"')}
-        ${field('email', 'דוא״ל', 'email', 'inputmode="email" autocomplete="email" class="ltr"')}
+        ${form.personal.map(fieldHTML).join('')}
       </section>
 
-      <section class="card" id="sec-questions">
-        <h2>שאלון רפואי</h2>
-        <p class="settings-note">יש לסמן כן או לא בכל שאלה. אם התשובה כן, נא לפרט.</p>
-        ${form.questions.map((q, i) => {
-          const a = st.answers[i];
-          return `<div class="q" data-q="${i}">
-            <p class="q-text"><b>${i + 1}.</b> ${esc(q)}</p>
-            <div class="yn">
-              <button type="button" data-yn="1" class="${a.yes === true ? 'on yes' : ''}" aria-pressed="${a.yes === true}">כן</button>
-              <button type="button" data-yn="0" class="${a.yes === false ? 'on' : ''}" aria-pressed="${a.yes === false}">לא</button>
-            </div>
-            <textarea class="q-details" data-qd="${i}" placeholder="אם כן, פרט/י" ${a.yes === true ? '' : 'hidden'}>${esc(a.details)}</textarea>
-          </div>`;
-        }).join('')}
-      </section>
+      ${form.sections.map(sectionHTML).join('')}
+      ${form.agreements.map(agreementHTML).join('')}
 
-      <section class="card" id="sec-health">
-        <h2>${esc(form.health.title)}</h2>
-        <p>${esc(form.health.intro)}</p>
-        <ol class="legal">${form.health.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
-        <label class="check-row"><input type="checkbox" id="healthOk" ${st.healthOk ? 'checked' : ''}><span>${esc(form.health.confirm)}</span></label>
-      </section>
-
-      <section class="card" id="sec-consent">
-        <h2>${esc(form.consent.title)}</h2>
-        <ol class="legal">${form.consent.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
-        <p class="settings-note">${esc(form.consent.footnote)}</p>
-        <label class="check-row"><input type="checkbox" id="consentOk" ${st.consentOk ? 'checked' : ''}><span>${esc(form.consent.confirm)}</span></label>
-      </section>
+      ${form.options ? `<section class="card" id="sec-options">
+        <h2>${esc(form.options.title)}</h2>
+        <p class="settings-note">${esc(form.options.note)}</p>
+        ${form.options.items.map((t, i) => `<label class="check-row soft"><input type="checkbox" data-opt="${i}" ${st.opts[i] ? 'checked' : ''}><span>${esc(t)}</span></label>`).join('')}
+      </section>` : ''}
 
       <section class="card" id="sec-guardian" ${isMinor() ? '' : 'hidden'}>
         <h2>אישור הורה / אפוטרופוס</h2>
-        <p class="settings-note">המטופל/ת מתחת לגיל ${MINOR_AGE}, ולכן נדרשת גם חתימה של הורה או אפוטרופוס.</p>
+        <p class="settings-note">המטופל/ת מתחת לגיל ${guardianAge}, ולכן נדרשת גם חתימה של הורה או אפוטרופוס.</p>
         <div class="field"><label for="g-name">שם האפוטרופוס *</label><input id="g-name" type="text" data-guardian="name" value="${esc(st.guardian.name)}"></div>
         <div class="field"><label for="g-rel">סוג קרבה *</label><input id="g-rel" type="text" data-guardian="relation" value="${esc(st.guardian.relation)}" placeholder="למשל: אמא"></div>
         <div class="field">
@@ -193,6 +243,17 @@
   }
 
   /* ---------- אירועים ---------- */
+  const itemBox = (el) => el.closest('[data-q]');
+
+  function refreshDetail(i) {
+    const box = $(`[data-q="${i}"]`);
+    const ta = box && $('.q-details', box);
+    if (!ta) return;
+    const show = detailShown(ITEMS[i], st.answers[i]);
+    ta.hidden = !show;
+    if (show && !ta.value) ta.focus();
+  }
+
   root.addEventListener('input', (e) => {
     const t = e.target;
     t.classList.remove('invalid');
@@ -201,6 +262,8 @@
       if (t.dataset.detail === 'birth') updateGuardian();
     } else if (t.dataset.qd != null) {
       st.answers[Number(t.dataset.qd)].details = t.value;
+    } else if (t.dataset.qt != null) {
+      st.answers[Number(t.dataset.qt)].text = t.value;
     } else if (t.dataset.guardian) {
       st.guardian[t.dataset.guardian] = t.value;
     }
@@ -208,17 +271,25 @@
   });
 
   root.addEventListener('change', (e) => {
-    if (e.target.id === 'healthOk') st.healthOk = e.target.checked;
-    if (e.target.id === 'consentOk') st.consentOk = e.target.checked;
-    if (e.target.type === 'checkbox') e.target.closest('.check-row').classList.remove('invalid');
-    if (e.target.dataset.detail === 'birth') updateGuardian();
+    const t = e.target;
+    if (t.dataset.ck != null) {
+      const i = Number(t.dataset.ck);
+      st.answers[i].yes = t.checked;
+      refreshDetail(i);
+    } else if (t.dataset.agree) {
+      st.agree[t.dataset.agree] = t.checked;
+    } else if (t.dataset.opt != null) {
+      st.opts[Number(t.dataset.opt)] = t.checked;
+    }
+    if (t.type === 'checkbox' && t.closest('.check-row')) t.closest('.check-row').classList.remove('invalid');
+    if (t.dataset.detail === 'birth') updateGuardian();
     saveDraft();
   });
 
   root.addEventListener('click', (e) => {
     const yn = e.target.closest('[data-yn]');
     if (yn) {
-      const box = yn.closest('.q');
+      const box = itemBox(yn);
       const i = Number(box.dataset.q);
       const yes = yn.dataset.yn === '1';
       st.answers[i].yes = yes;
@@ -229,17 +300,16 @@
         b.setAttribute('aria-pressed', on);
       });
       box.classList.remove('invalid');
-      const ta = $('.q-details', box);
-      ta.hidden = !yes;
-      if (yes && !ta.value) ta.focus();
+      refreshDetail(i);
       saveDraft();
       return;
     }
-    const mar = e.target.closest('[data-marital]');
-    if (mar) {
-      st.details.marital = st.details.marital === mar.dataset.marital ? '' : mar.dataset.marital;
-      $$('#marital button').forEach((b) => {
-        const on = b.dataset.marital === st.details.marital;
+    const seg = e.target.closest('[data-seg]');
+    if (seg) {
+      const k = seg.dataset.seg;
+      st.details[k] = st.details[k] === seg.dataset.v ? '' : seg.dataset.v;
+      $$(`[data-seg="${k}"]`).forEach((b) => {
+        const on = b.dataset.v === st.details[k];
         b.classList.toggle('on', on);
         b.setAttribute('aria-pressed', on);
       });
@@ -264,18 +334,24 @@
     const bad = [];
     const mark = (el) => { if (el) { el.classList.add('invalid'); bad.push(el); } };
     const d = st.details;
-    if (d.name.trim().split(/\s+/).length < 2) mark($('#d-name'));
-    if (!/^\d{5,9}$/.test(d.idNum.replace(/\D/g, '')) || /[^\d\s-]/.test(d.idNum)) mark($('#d-idNum'));
-    if (ageFrom(d.birth) == null) mark($('#d-birth'));
-    if (d.phone.replace(/\D/g, '').length < 9) mark($('#d-phone'));
-    if (d.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email.trim())) mark($('#d-email'));
-    st.answers.forEach((a, i) => {
-      const box = $(`.q[data-q="${i}"]`);
-      if (a.yes == null) mark(box);
-      else if (a.yes && !a.details.trim()) mark($('.q-details', box));
+    form.personal.forEach((k) => {
+      const f = FIELDS[k];
+      const v = (d[k] || '').trim();
+      if (k === 'name') { if (v.split(/\s+/).length < 2) mark($('#d-name')); return; }
+      if (k === 'idNum') { if (!/^\d{5,9}$/.test(v.replace(/\D/g, '')) || /[^\d\s-]/.test(v)) mark($('#d-idNum')); return; }
+      if (k === 'birth') { if (ageFrom(v) == null) mark($('#d-birth')); return; }
+      if (k === 'phone') { if (v.replace(/\D/g, '').length < 9) mark($('#d-phone')); return; }
+      if (k === 'email') { if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) mark($('#d-email')); return; }
+      if (f.req && !v) mark($(`#d-${k}`));
     });
-    if (!st.healthOk) mark($('#healthOk').closest('.check-row'));
-    if (!st.consentOk) mark($('#consentOk').closest('.check-row'));
+    ITEMS.forEach((it, i) => {
+      const a = st.answers[i];
+      const box = $(`[data-q="${i}"]`);
+      if (it.k === 'yn' && a.yes == null) mark(box);
+      else if (it.detail === 'req' && detailShown(it, a) && !a.details.trim()) mark($('.q-details', box));
+      else if (it.k === 'text' && it.required && !a.text.trim()) mark($('.q-text-input', box));
+    });
+    form.agreements.forEach((ag) => { if (!st.agree[ag.key]) mark($(`[data-agree="${ag.key}"]`).closest('.check-row')); });
     if (isMinor()) {
       if (!st.guardian.name.trim()) mark($('#g-name'));
       if (!st.guardian.relation.trim()) mark($('#g-rel'));
@@ -283,6 +359,22 @@
     }
     if (pads.client.isEmpty()) mark($('#sigClient').closest('.sig-box'));
     return bad;
+  }
+
+  // התשובה מסמנת "כדאי לעבור עליה" בכרטיס של סימה?
+  function isAlert(it, a) {
+    if (it.k === 'text' || it.flag === false) return false;
+    if (it.flag === 'no') return a.yes === false;
+    return a.yes === true;
+  }
+
+  function buildAnswers() {
+    return ITEMS.map((it, i) => {
+      const a = st.answers[i];
+      const out = { q: it.q, kind: it.k, section: it.sec.title };
+      if (it.k === 'text') return { ...out, text: a.text.trim() };
+      return { ...out, yes: a.yes === true, details: detailShown(it, a) ? a.details.trim() : '', alert: isAlert(it, a) };
+    });
   }
 
   let sending = false;
@@ -304,21 +396,20 @@
     btn.textContent = 'שולח…';
     btn.classList.add('disabled');
     const minor = isMinor();
+    const details = {};
+    form.personal.forEach((k) => { details[k] = (st.details[k] || '').trim(); });
+    details.name = details.name.replace(/\s+/g, ' ');
+    if ('idNum' in details) details.idNum = details.idNum.replace(/\D/g, '');
     const payload = {
-      v: 1,
+      v: 2,
       formId: form.id,
       formTitle: form.title,
       submittedAt: new Date().toISOString(),
-      details: {
-        ...st.details,
-        name: st.details.name.trim().replace(/\s+/g, ' '),
-        idNum: st.details.idNum.replace(/\D/g, ''),
-        email: st.details.email.trim(),
-      },
+      details,
       age: ageFrom(st.details.birth),
-      answers: form.questions.map((q, i) => ({ q, yes: st.answers[i].yes, details: st.answers[i].yes ? st.answers[i].details.trim() : '' })),
-      healthOk: true,
-      consentOk: true,
+      answers: buildAnswers(),
+      agreements: form.agreements.map((ag) => ({ key: ag.key, title: ag.title, ok: true })),
+      options: form.options ? form.options.items.map((label, i) => ({ label, yes: !!st.opts[i] })) : [],
       signature: pads.client.toData(),
       guardian: minor ? { name: st.guardian.name.trim(), relation: st.guardian.relation.trim(), signature: pads.guardian.toData() } : null,
     };

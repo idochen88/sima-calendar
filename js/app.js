@@ -972,7 +972,8 @@
   /* ---------- הצהרות בריאות ---------- */
   const formLink = (f) => new URL(`form.html?f=${encodeURIComponent(f.id)}`, location.href).href;
   const declTitle = (d) => d.formTitle || (Forms.formById(d.formId) || {}).title || 'הצהרת בריאות';
-  const yesAnswers = (d) => (d.answers || []).filter((a) => a.yes);
+  // סעיפים שכדאי לעבור עליהם (בטפסים ישנים: כל תשובת "כן")
+  const yesAnswers = (d) => (d.answers || []).filter((a) => (a.alert != null ? a.alert : a.yes));
   const unseenDecls = () => state.decls.filter((d) => !d.seen).length;
   const sortDecls = (list) => [...list].sort((a, b) => b.createdAt - a.createdAt);
 
@@ -1000,7 +1001,7 @@
       const yes = yesAnswers(s.last).length;
       const open = `<button class="decl-open" data-action="open-decl" data-id="${esc(s.last.id)}">
           <b>${esc(f.title)}</b>
-          <small>${s.state === 'expired' ? '⚠️ ' : '✓ '}נחתמה ב-${fullShortDate(s.last.date)} · ${agoLabel(s.last.date)}${yes ? ` · ${yes} תשובות "כן"` : ''}</small>
+          <small>${s.state === 'expired' ? '⚠️ ' : '✓ '}נחתמה ב-${fullShortDate(s.last.date)} · ${agoLabel(s.last.date)}${yes ? ` · ${yes} סעיפים לבדיקה` : ''}</small>
         </button>`;
       return s.state === 'expired'
         ? `<div class="decl-status expired">${open}<p>עברה יותר משנה מאז החתימה. כדאי לשלוח הצהרה חדשה.</p>${send}</div>`
@@ -1016,7 +1017,7 @@
         <span class="avatar">${esc(initial(name))}</span>
         <span class="cr-main"><b>${esc(name)}</b>
           <span>${esc(declTitle(d))} · ${fullShortDate(d.date)}</span>
-          <span class="decl-chips">${d.seen ? '' : '<i class="chip-new">חדש</i>'}${d.matched ? '' : '<i class="chip-soft">לקוחה חדשה</i>'}${yes ? `<i class="chip-warn">${yes} תשובות "כן"</i>` : ''}</span>
+          <span class="decl-chips">${d.seen ? '' : '<i class="chip-new">חדש</i>'}${d.matched ? '' : '<i class="chip-soft">לקוחה חדשה</i>'}${yes ? `<i class="chip-warn">${yes} לבדיקה</i>` : ''}</span>
         </span>
         <span class="cr-chev">${I.left}</span>
       </button>`;
@@ -1065,6 +1066,42 @@
       </section>`;
   }
 
+  // התשובות מקובצות לפי נושא: כן/לא כשורות, תיבות סימון כרשימה של מה שסומן, וטקסט חופשי
+  function answerSections(d) {
+    const groups = [];
+    (d.answers || []).forEach((a) => {
+      const title = a.section || 'שאלון רפואי';
+      let g = groups.find((x) => x.title === title);
+      if (!g) groups.push(g = { title, items: [] });
+      g.items.push(a);
+    });
+    return groups.map((g) => {
+      let html = '';
+      let ticked = [];
+      let hasChecks = false;
+      const flush = () => {
+        if (!hasChecks) return;
+        html += ticked.length
+          ? `<div class="ticked">${ticked.map((a) => `<span class="tick">${esc(a.q)}${a.details ? `: ${esc(a.details)}` : ''}</span>`).join('')}</div>`
+          : '<p class="settings-note" style="margin:6px 0">לא סומן דבר</p>';
+        ticked = [];
+        hasChecks = false;
+      };
+      g.items.forEach((a, i) => {
+        if (a.kind === 'check') { hasChecks = true; if (a.yes) ticked.push(a); return; }
+        flush();
+        if (a.kind === 'text') {
+          if (a.text) html += `<div class="ans"><p>${esc(a.q)}</p><b class="txt">${esc(a.text)}</b></div>`;
+          return;
+        }
+        html += `<div class="ans ${a.alert != null ? (a.alert ? 'yes' : '') : (a.yes ? 'yes' : '')}">
+          <p>${a.kind ? '' : `${i + 1}. `}${esc(a.q)}</p><span class="ans-val">${a.yes ? 'כן' : 'לא'}</span>${a.details ? `<b>${esc(a.details)}</b>` : ''}</div>`;
+      });
+      flush();
+      return `<section class="card"><h2>${esc(g.title)}</h2>${html}</section>`;
+    }).join('');
+  }
+
   function openDecl(id) {
     const d = state.decls.find((x) => x.id === id);
     if (!d) return;
@@ -1078,6 +1115,8 @@
     const form = Forms.formById(d.formId);
     const person = personForDecl(d);
     const kv = (lbl, v) => v ? `<div class="kv"><span>${lbl}</span><b>${esc(v)}</b></div>` : '';
+    const agreementTitles = Array.isArray(d.agreements) ? d.agreements.filter((x) => x.ok).map((x) => x.title)
+      : form ? form.agreements.map((x) => x.title) : []; // הצהרות ישנות: אישרה הכול
     const birth = /^\d{4}-\d{2}-\d{2}$/.test(det.birth || '') ? `${fullShortDate(det.birth)}${d.age != null ? ` (גיל ${d.age})` : ''}` : det.birth;
     openSheet(`
       <div class="sheet-head">
@@ -1090,24 +1129,24 @@
           <span class="avatar big">${esc(initial(det.name))}</span>
           <div><h1>${esc(det.name || '')}</h1><div class="muted">נחתמה ב-${fullShortDate(d.date)} · ${agoLabel(d.date)}</div></div>
         </div>
-        ${yes.length ? `<section class="card yes-card"><h2>${yes.length} תשובות "כן" — כדאי לעבור עליהן</h2>
-          ${yes.map((a) => `<div class="ans yes"><p>${esc(a.q)}</p>${a.details ? `<b>${esc(a.details)}</b>` : ''}</div>`).join('')}
-        </section>` : '<div class="card ok-card">✓ כל התשובות בשאלון הרפואי הן "לא"</div>'}
+        ${yes.length ? `<section class="card yes-card"><h2>${yes.length} סעיפים שכדאי לעבור עליהם</h2>
+          ${yes.map((a) => `<div class="ans yes"><p>${a.section ? `<small>${esc(a.section)}</small><br>` : ''}${esc(a.q)}${a.yes === false ? ' (ענתה: לא)' : ''}</p>${a.details ? `<b>${esc(a.details)}</b>` : ''}</div>`).join('')}
+        </section>` : '<div class="card ok-card">✓ אין סעיפים שדורשים תשומת לב</div>'}
         <section class="card"><h2>פרטים אישיים</h2>
           ${kv('תעודת זהות', det.idNum)}${kv('תאריך לידה', birth)}${kv('מצב משפחתי', det.marital)}
           ${kv('טלפון נייד', det.phone)}${kv('טלפון נוסף', det.phone2)}${kv('כתובת', det.address)}${kv('דוא״ל', det.email)}
+          ${kv('מקצוע', det.job)}${kv('גובה', det.height ? det.height + ' ס״מ' : '')}${kv('משקל', det.weight ? det.weight + ' ק״ג' : '')}
         </section>
-        <section class="card"><h2>שאלון רפואי</h2>
-          ${(d.answers || []).map((a, i) => `<div class="ans ${a.yes ? 'yes' : ''}">
-            <p>${i + 1}. ${esc(a.q)}</p><span class="ans-val">${a.yes ? 'כן' : 'לא'}</span>${a.yes && a.details ? `<b>${esc(a.details)}</b>` : ''}
-          </div>`).join('')}
-        </section>
-        <section class="card"><h2>הצהרה והסכמה</h2>
-          <p class="ok-line">✓ אישרה את הצהרת הבריאות</p>
-          <p class="ok-line">✓ אישרה את טופס ההסכמה לטיפול</p>
+        ${answerSections(d)}
+        ${(d.options || []).length ? `<section class="card"><h2>חומרי שיווק ופרסום</h2>
+          ${d.options.map((o) => `<p class="ok-line ${o.yes ? '' : 'no'}">${o.yes ? '✓' : '✗'} ${esc(o.label)}</p>`).join('')}
+        </section>` : ''}
+        <section class="card"><h2>הצהרות והסכמות</h2>
+          ${agreementTitles.map((t) => `<p class="ok-line">✓ אישרה: ${esc(t)}</p>`).join('')}
           ${form ? `<details class="howto"><summary>הנוסח המלא שאושר</summary>
-            <p><b>${esc(form.health.title)}</b><br>${esc(form.health.intro)}</p><ol class="legal">${form.health.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
-            <p><b>${esc(form.consent.title)}</b></p><ol class="legal">${form.consent.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>
+            ${form.agreements.map((ag) => `<p><b>${esc(ag.title)}</b>${ag.intro ? `<br>${esc(ag.intro)}` : ''}</p>
+              ${ag.items ? `<ol class="legal">${ag.items.map((t) => `<li>${esc(t)}</li>`).join('')}</ol>` : ''}
+              ${(ag.text || []).map((t) => `<p class="legal-p">${esc(t)}</p>`).join('')}`).join('')}
           </details>` : ''}
         </section>
         <section class="card"><h2>חתימה</h2>
@@ -1217,6 +1256,8 @@
       details: p.details,
       age: p.age == null ? null : p.age,
       answers: p.answers,
+      agreements: Array.isArray(p.agreements) ? p.agreements : null,
+      options: Array.isArray(p.options) ? p.options : [],
       signature: typeof p.signature === 'string' ? p.signature : '',
       guardian: p.guardian || null,
     };

@@ -59,6 +59,7 @@
   const DEFAULT_COLORS = { 't-face': '#E5879F', 't-hair': '#9C8CDB', 't-brows': '#B38B6D' };
   const NEUTRAL = '#C9B7AE';
   const ALARM_OPTIONS = [5, 10, 15, 30, 60];
+  const WINBACK_OPTIONS = [2, 3, 4, 6, 12];
 
   const DEFAULT_TYPES = [
     { id: 't-face', name: 'טיפול פנים', price: 250, duration: 60, color: '#E5879F', subs: [] },
@@ -72,6 +73,8 @@
     products: [],
     alarmMinutes: 15,
     askCalendar: true,
+    winbackMonths: 3,
+    winbackTemplate: L.DEFAULT_WINBACK_TEMPLATE,
   };
 
   // משלים שדות חדשים (צבע, תתי-סוגים, תכשירים) להגדרות שנשמרו בגרסה קודמת
@@ -93,6 +96,8 @@
     }));
     s.alarmMinutes = ALARM_OPTIONS.includes(Number(s.alarmMinutes)) ? Number(s.alarmMinutes) : 15;
     s.askCalendar = s.askCalendar !== false;
+    s.winbackMonths = WINBACK_OPTIONS.includes(Number(s.winbackMonths)) ? Number(s.winbackMonths) : 3;
+    if (typeof s.winbackTemplate !== 'string' || !s.winbackTemplate.trim()) s.winbackTemplate = L.DEFAULT_WINBACK_TEMPLATE;
     if (typeof s.businessName !== 'string') s.businessName = DEFAULT_SETTINGS.businessName;
     if (typeof s.template !== 'string' || !s.template.trim()) s.template = L.DEFAULT_TEMPLATE;
     return s;
@@ -148,6 +153,7 @@
     clientBack: 'clients',
     photoCache: {}, // תמונות לפי לקוחה, נטענות כשנכנסים לכרטיס
     compare: {}, // איזו תמונה היא "לפני" ואיזו "אחרי" לכל לקוחה
+    winbackAll: false, // להציג את כל הלקוחות שלא חזרו, לא רק את הראשונות
     decls: [], // הצהרות בריאות שהתקבלו
     declSync: { at: 0, error: '' },
   };
@@ -483,6 +489,66 @@
       </article>`;
   }
 
+  /* ---------- לקוחות שלא חזרו ---------- */
+  const WINBACK_SHOWN = 5;
+  const monthsLabel = (n) => n === 12 ? 'שנה' : n === 2 ? 'חודשיים' : `${n} חודשים`;
+
+  // כל הלקוחות שעברו את הסף, ליד מה שכבר נשלח להן / סומן כלא רלוונטי (נקשר לביקור האחרון: ביקור חדש מאפס)
+  function winbackList() {
+    const marks = state.meta.winback || {};
+    return L.overdueClients(state.appts, today(), state.settings.winbackMonths)
+      .map((c) => ({ ...c, mark: marks[c.key] && marks[c.key].lastVisit === c.lastVisit ? marks[c.key] : null }))
+      .filter((c) => !(c.mark && c.mark.dismissed));
+  }
+
+  function winbackText(c) {
+    return L.fillTemplate(state.settings.winbackTemplate, c.last, state.settings.businessName);
+  }
+
+  function winbackRow(c) {
+    const link = L.waLink(c.phone, winbackText(c));
+    const when = `ביקור אחרון ${fullShortDate(c.lastVisit)} · ${agoLabel(c.lastVisit)}`;
+    const sent = c.mark && c.mark.sentAt;
+    const wa = !link
+      ? `<span class="muted wb-nophone">אין מספר טלפון</span>`
+      : `<a class="btn ${sent ? 'wa-done' : 'wa'} small" href="${esc(link)}" target="_blank" rel="noopener" data-action="wb-sent" data-key="${esc(c.key)}" data-last="${c.lastVisit}">${sent ? `${I.check}נשלחה · שוב` : `${I.wa}שליחת הודעה`}</a>`;
+    return `<div class="wb-row ${sent ? 'done' : ''}">
+        <button class="wb-who" data-action="open-client" data-key="${esc(c.key)}">
+          <span class="avatar">${esc(initial(c.name))}</span>
+          <span class="cr-main"><b>${esc(c.name)}</b><span>${when}${c.visits > 1 ? ` · ${c.visits} ביקורים` : ''}</span>
+            ${sent ? `<span class="wb-sentline">נשלחה ב-${new Date(c.mark.sentAt).toLocaleDateString('he-IL', { day: 'numeric', month: 'numeric' })}</span>` : ''}</span>
+        </button>
+        <div class="wb-actions">${wa}
+          <button class="link-btn" data-action="wb-dismiss" data-key="${esc(c.key)}" data-last="${c.lastVisit}">לא רלוונטי</button></div>
+      </div>`;
+  }
+
+  function winbackHTML() {
+    const list = winbackList();
+    if (!list.length) return '';
+    const todo = list.filter((c) => !c.mark || !c.mark.sentAt);
+    const done = list.filter((c) => c.mark && c.mark.sentAt);
+    const shown = state.winbackAll ? todo : todo.slice(0, WINBACK_SHOWN);
+    const more = todo.length - shown.length;
+    return `<section class="card" id="winback">
+      <h2>לא ביקרו ${monthsLabel(state.settings.winbackMonths)} <small>(${todo.length})</small></h2>
+      <p class="settings-note" style="margin-top:-6px">לקוחות שהיו אצלך ולא קבעו תור חדש, מהביקור האחרון ביותר אחורה.</p>
+      ${shown.length ? shown.map(winbackRow).join('') : '<p class="settings-note" style="margin:0">הכול טופל ✓</p>'}
+      ${more > 0 ? `<button class="btn secondary" data-action="wb-more" style="margin-top:8px">הצגת עוד ${more}</button>` : ''}
+      ${state.winbackAll && todo.length > WINBACK_SHOWN ? `<button class="link-btn" data-action="wb-less">הצגת פחות</button>` : ''}
+      ${done.length ? `<h3 class="list-head" style="margin-inline:0">נשלחה הודעה (${done.length})</h3>${done.map(winbackRow).join('')}` : ''}
+    </section>`;
+  }
+
+  function winbackAlert() {
+    const n = winbackList().filter((c) => !c.mark || !c.mark.sentAt).length;
+    if (!n) return '';
+    return `<button class="alert" data-action="wb-scroll">
+      <span class="alert-count">${n}</span>
+      <span class="alert-text"><b>${n === 1 ? 'לקוחה אחת לא ביקרה' : `${n} לקוחות לא ביקרו`} ${monthsLabel(state.settings.winbackMonths)}</b><span>כדאי לשלוח להן הודעה</span></span>
+      ${I.left}</button>`;
+  }
+
   function viewReminders() {
     const d = state.remDay || tomorrow();
     const r = L.reminderStatus(state.appts, d);
@@ -490,6 +556,7 @@
     const label = d === tomorrow() ? `מחר · יום ${L.dayName(d)}` : `${dayLabel(d)}${dayLabel(d).startsWith('יום') ? '' : ` · יום ${L.dayName(d)}`}`;
     return `
       <div class="vhead"><div class="vhead-title"><h1>תזכורות</h1><p class="sub">שליחת תזכורות ואישורי הגעה</p></div></div>
+      ${winbackAlert()}
       ${periodNav(label, L.longDate(d), 'rem-prev', 'rem-next', d === tomorrow() ? '' : 'rem-tomorrow', 'חזרה למחר')}
       ${r.total ? `
         <div class="chips-line">
@@ -503,7 +570,8 @@
         ${cancelled.map((a) => `<button class="history-item" data-action="edit-appt" data-id="${a.id}">
           <span class="hi-date"><b>${esc(a.time)}</b></span>
           <span class="hi-main">${esc(a.clientName)} · <span class="muted">${esc(L.treatmentNames(a))}</span></span>
-          <span class="pill cancelled">ביטלה</span></button>`).join('')}</div>` : ''}`;
+          <span class="pill cancelled">ביטלה</span></button>`).join('')}</div>` : ''}
+      ${winbackHTML()}`;
   }
 
   /* ---------- מסך סיכומים ---------- */
@@ -1564,6 +1632,11 @@
     return L.fillTemplate(state.settings.template, sample, state.settings.businessName);
   }
 
+  function winbackPreview() {
+    const sample = { clientName: 'דנה', time: '10:30', date: L.addDays(today(), -100), items: [{ name: (state.settings.treatmentTypes[0] || { name: 'טיפול פנים' }).name }] };
+    return L.fillTemplate(state.settings.winbackTemplate, sample, state.settings.businessName);
+  }
+
   function viewSettings() {
     const st = state.settings;
     const last = state.meta.lastBackup;
@@ -1666,6 +1739,22 @@
         <div class="var-chips">${TEMPLATE_VARS.map((v) => `<button data-action="insert-var" data-var="${v}">{${v}}</button>`).join('')}</div>
         <div class="wa-preview-wrap"><small>כך זה ייראה ללקוחה:</small><div class="wa-preview" id="tplPreview">${esc(templatePreview())}</div></div>
         <button class="link-btn" data-action="reset-template">שחזור הנוסח המקורי</button>
+      </section>
+
+      <section class="card">
+        <h2>לקוחות שלא חזרו</h2>
+        <p class="settings-note">בלשונית "תזכורות" יופיעו לקוחות שהיו אצלך ולא קבעו תור חדש, עם כפתור לשליחת הודעה בוואטסאפ.</p>
+        <div class="field">
+          <label for="wbMonths">להזכיר אחרי כמה זמן בלי ביקור?</label>
+          <select id="wbMonths">${WINBACK_OPTIONS.map((m) => `<option value="${m}" ${st.winbackMonths === m ? 'selected' : ''}>${monthsLabel(m)}</option>`).join('')}</select>
+        </div>
+        <div class="field" style="margin-bottom:0">
+          <label for="wbTpl">נוסח ההודעה</label>
+          <textarea id="wbTpl" rows="5">${esc(st.winbackTemplate)}</textarea>
+        </div>
+        <p class="settings-note" style="margin:6px 0">אפשר להשתמש ב-{שם}, {שם מלא}, {טיפול}, {תאריך} (הביקור האחרון) ו-{עסק}.</p>
+        <div class="wa-preview-wrap"><small>כך זה ייראה ללקוחה:</small><div class="wa-preview" id="wbPreview">${esc(winbackPreview())}</div></div>
+        <button class="link-btn" data-action="reset-winback">שחזור הנוסח המקורי</button>
       </section>
 
       <section class="card">
@@ -2665,9 +2754,21 @@
         state.settings.askCalendar = e.target.checked;
         await saveSettings();
       });
+      $('#wbMonths').addEventListener('change', async (e) => {
+        state.settings.winbackMonths = Number(e.target.value);
+        await saveSettings();
+        toast('נשמר');
+      });
+      $('#wbTpl').addEventListener('input', (e) => {
+        state.settings.winbackTemplate = e.target.value;
+        $('#wbPreview').textContent = winbackPreview();
+        clearTimeout(tplTimer);
+        tplTimer = setTimeout(saveSettings, 400);
+      });
       $('#bizName').addEventListener('input', (e) => {
         state.settings.businessName = e.target.value;
         $('#tplPreview').textContent = templatePreview();
+        $('#wbPreview').textContent = winbackPreview();
         clearTimeout(tplTimer);
         tplTimer = setTimeout(saveSettings, 400);
       });
@@ -2873,6 +2974,35 @@
         render();
       }, 400);
       return true;
+    },
+    'wb-sent': (el) => {
+      // הקישור נפתח כרגיל; מסמנים שנשלחה אחרי רגע קצר
+      const { key, last } = el.dataset;
+      setTimeout(async () => {
+        state.meta.winback = { ...(state.meta.winback || {}), [key]: { lastVisit: last, sentAt: Date.now() } };
+        await saveMeta();
+        render();
+      }, 400);
+      return true;
+    },
+    'wb-dismiss': async (el) => {
+      const { key, last } = el.dataset;
+      const c = winbackList().find((x) => x.key === key);
+      const ok = await ask({ title: `להסתיר את ${c ? c.name : 'הלקוחה'}?`, text: 'היא לא תופיע ברשימה עד הביקור הבא שלה.', ok: 'להסתיר' });
+      if (!ok) return;
+      state.meta.winback = { ...(state.meta.winback || {}), [key]: { lastVisit: last, dismissed: true } };
+      await saveMeta();
+      render();
+    },
+    'wb-more': () => { state.winbackAll = true; render(); },
+    'wb-less': () => { state.winbackAll = false; render(); },
+    'wb-scroll': () => { const el = $('#winback'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+    'reset-winback': async () => {
+      const ok = await ask({ title: 'לשחזר את הנוסח המקורי?', text: 'הנוסח הנוכחי יימחק.', ok: 'שחזור' });
+      if (!ok) return;
+      state.settings.winbackTemplate = L.DEFAULT_WINBACK_TEMPLATE;
+      await saveSettings();
+      render();
     },
     'unsend': async (el) => {
       const a = findAppt(el.dataset.id);

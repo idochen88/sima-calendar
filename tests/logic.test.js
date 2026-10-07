@@ -421,3 +421,37 @@ test('declStatus: האחרונה, ופג תוקף אחרי שנה', () => {
   assert.equal(L.declStatus(decls, 'מיכל', 'hair', '2026-10-05').state, 'none');
   assert.equal(L.declStatus(decls, 'דנה', 'face', '2026-10-05').state, 'none');
 });
+
+/* ---------- לקוחות שלא חזרו ---------- */
+const visit = (name, date, extra = {}) => appt(date, '10:00', [['טיפול פנים', 250]], 'bit', 'confirmed', { clientName: name, ...extra });
+
+test('plusMonths: אותו יום, ובחודש קצר היום האחרון', () => {
+  assert.equal(L.plusMonths('2026-07-05', 3), '2026-10-05');
+  assert.equal(L.plusMonths('2026-11-30', 3), '2027-02-28');
+  assert.equal(L.plusMonths('2025-12-15', 3), '2026-03-15');
+  assert.equal(L.plusMonths('2026-01-31', 1), '2026-02-28');
+});
+
+test('overdueClients: מי שלא ביקרה 3 חודשים', () => {
+  const data = [
+    visit('דנה', '2026-07-05'),                     // בדיוק 3 חודשים ב-5.10 → כן
+    visit('רות', '2026-07-06'),                     // יום אחד לפני הסף → עוד לא
+    visit('מיכל', '2026-03-01'),                    // ישן → כן
+    visit('מיכל', '2026-01-10'),                    // (ביקור ישן יותר לא משנה)
+    visit('נעמה', '2026-04-01'),                    // ישן, אבל יש תור קדימה → לא
+    visit('נעמה', '2026-11-01', { status: 'pending' }),
+    visit('שרה', '2026-04-01'),                     // ישן, אבל התור הקדימה בוטל → כן
+    visit('שרה', '2026-11-01', { status: 'cancelled' }),
+    visit('לאה', '2026-03-01', { status: 'cancelled' }), // רק ביטול → מעולם לא ביקרה → לא
+  ];
+  const r = L.overdueClients(data, '2026-10-05', 3);
+  assert.deepEqual(r.map((c) => c.name), ['דנה', 'שרה', 'מיכל']);   // מהקרובה לסף
+  assert.equal(r.find((c) => c.name === 'מיכל').lastVisit, '2026-03-01');
+  assert.equal(r.find((c) => c.name === 'מיכל').visits, 2);
+  assert.deepEqual(L.overdueClients(data, '2026-10-05', 6).map((c) => c.name), ['שרה', 'מיכל']); // סף של 6 חודשים
+});
+
+test('overdueClients: אותה לקוחה בכתיב שונה נספרת פעם אחת', () => {
+  const r = L.overdueClients([visit('דנה כהן', '2026-03-01'), visit('  דנה  כהן ', '2026-02-01')], '2026-10-05', 3);
+  assert.equal(r.length, 1);
+});

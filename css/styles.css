@@ -994,3 +994,16 @@ ol.legal li { margin-bottom: 6px; }
 .tick { background: var(--orange-soft); color: #9a5a12; font-weight: 600; font-size: 14px; padding: 3px 10px; border-radius: 10px; }
 .ans .txt { color: var(--text); font-weight: 600; }
 .ans small { color: var(--muted); }
+
+/* ---------- לקוחות שלא חזרו (תזכורות) ---------- */
+.wb-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.wb-row:last-child { border-bottom: 0; }
+.wb-row.done { opacity: .75; }
+.wb-who { display: flex; align-items: center; gap: 12px; width: 100%; text-align: start; margin-bottom: 8px; }
+.wb-who .cr-main { display: flex; flex-direction: column; min-width: 0; }
+.wb-who .cr-main span { color: var(--muted); font-size: 13px; }
+.wb-who .cr-main b { color: var(--text); font-size: 17px; }
+.wb-sentline { color: var(--green) !important; font-weight: 600; }
+.wb-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.wb-actions .btn.small { flex: 1; }
+.wb-nophone { flex: 1; font-size: 14px; }

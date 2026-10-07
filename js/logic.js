@@ -39,6 +39,13 @@
     'תודה ונתראה,\n' +
     '{עסק}';
 
+  const DEFAULT_WINBACK_TEMPLATE =
+    'היי {שם} 🌸\n' +
+    'עבר קצת זמן מאז הביקור האחרון שלך אצלי, וחשבתי עלייך.\n' +
+    'אשמח לראות אותך שוב, מתי נוח לך לקבוע תור?\n' +
+    'נתראה,\n' +
+    '{עסק}';
+
   /* ---------- תאריכים (כמחרוזות YYYY-MM-DD, לפי שעון מקומי) ---------- */
 
   const pad = (n) => String(n).padStart(2, '0');
@@ -84,6 +91,14 @@
     const [y, m] = s.split('-').map(Number);
     const d = new Date(y, m - 1 + n, 1, 12);
     return fmtDate(d);
+  }
+
+  // אותו יום בחודש, n חודשים קדימה (ביום קצר מדי בחודש היעד: היום האחרון בו)
+  function plusMonths(s, n) {
+    const [y, m, d] = s.split('-').map(Number);
+    const t = new Date(y, m - 1 + n, 1, 12);
+    const last = daysInMonth(t.getFullYear(), t.getMonth() + 1);
+    return fmtDate(new Date(t.getFullYear(), t.getMonth(), Math.min(d, last), 12));
   }
 
   // השבוע מתחיל ביום ראשון
@@ -497,6 +512,23 @@
     return [...map.values()];
   }
 
+  // לקוחות שהגיעו פעם, לא קבועה להן שום תור קדימה, והביקור האחרון שלהן היה לפני `months` חודשים או יותר.
+  // הקרובות לסף ראשונות. last: התור האחרון (לשימוש בהודעה).
+  function overdueClients(appts, today, months) {
+    const out = [];
+    for (const c of clientsIndex(appts)) {
+      const live = c.appts.filter(isCounted);
+      if (live.some((a) => a.date > today)) continue;
+      const past = live.filter((a) => a.date <= today)
+        .sort((a, b) => (a.date + (a.time || '')).localeCompare(b.date + (b.time || '')));
+      if (!past.length) continue;
+      const last = past[past.length - 1];
+      if (plusMonths(last.date, months) > today) continue;
+      out.push({ key: c.key, name: c.name, phone: c.phone, visits: past.length, lastVisit: last.date, last });
+    }
+    return out.sort((a, b) => b.lastVisit.localeCompare(a.lastVisit));
+  }
+
   function searchClients(clients, q) {
     const n = normName(q);
     if (!n) return clients;
@@ -681,7 +713,7 @@
 
   const api = {
     PAYMENTS, LEGACY_PAYMENTS, ALL_PAYMENTS, NO_PAYMENT, NO_PAYMENT_LABEL, STATUSES, DAY_NAMES, DAY_LETTERS, MONTH_NAMES,
-    DEFAULT_DURATION, DEFAULT_TEMPLATE,
+    DEFAULT_DURATION, DEFAULT_TEMPLATE, DEFAULT_WINBACK_TEMPLATE,
     parseDate, fmtDate, todayStr, addDays, dayOfWeek, daysInMonth, monthStart, monthEnd, addMonths,
     weekStart, weekRange, monthRange, monthWeeks, shortDate, longDate, monthLabel, dayName,
     timeToMin, minToTime, apptDuration, apptEnd,
@@ -690,6 +722,7 @@
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,
     normName, clientsIndex, searchClients, parseVCards, priceList, isHairType,
+    plusMonths, overdueClients,
     DECL_VALID_DAYS, phoneKey, matchByPhone, daysBetween, declStatus,
   };
 

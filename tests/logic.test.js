@@ -455,3 +455,9 @@ test('overdueClients: אותה לקוחה בכתיב שונה נספרת פעם 
   const r = L.overdueClients([visit('דנה כהן', '2026-03-01'), visit('  דנה  כהן ', '2026-02-01')], '2026-10-05', 3);
   assert.equal(r.length, 1);
 });
+
+test('נוסח ההודעה ללקוחות שלא חזרו: בלי "חשבתי עלייך", והשם והעסק מוצבים', () => {
+  assert.ok(!L.DEFAULT_WINBACK_TEMPLATE.includes('חשבתי'));
+  const msg = L.fillTemplate(L.DEFAULT_WINBACK_TEMPLATE, { clientName: 'דנה כהן', items: [] }, 'סימה');
+  assert.ok(msg.startsWith('היי דנה') && msg.endsWith('סימה'));
+});

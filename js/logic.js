@@ -39,6 +39,10 @@
     'תודה ונתראה,\n' +
     '{עסק}';
 
+  const DEFAULT_BIRTHDAY_TEMPLATE =
+    'מזל טוב {שם}! 🎉 מאחלת לך יום הולדת שמח, בריאות ואושר 💗\n' +
+    '{עסק}';
+
   const DEFAULT_WINBACK_TEMPLATE =
     'היי {שם} 🌸\n' +
     'מקווה ששלומך טוב! הייתי שמחה לראות אותך שוב אצלי.\n' +
@@ -741,7 +745,7 @@
 
   const api = {
     PAYMENTS, LEGACY_PAYMENTS, ALL_PAYMENTS, NO_PAYMENT, NO_PAYMENT_LABEL, STATUSES, DAY_NAMES, DAY_LETTERS, MONTH_NAMES,
-    DEFAULT_DURATION, DEFAULT_TEMPLATE, DEFAULT_WINBACK_TEMPLATE,
+    DEFAULT_DURATION, DEFAULT_TEMPLATE, DEFAULT_WINBACK_TEMPLATE, DEFAULT_BIRTHDAY_TEMPLATE,
     parseDate, fmtDate, todayStr, addDays, dayOfWeek, daysInMonth, monthStart, monthEnd, addMonths,
     weekStart, weekRange, monthRange, monthWeeks, shortDate, longDate, monthLabel, dayName,
     timeToMin, minToTime, apptDuration, apptEnd,

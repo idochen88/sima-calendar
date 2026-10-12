@@ -75,6 +75,7 @@
     askCalendar: true,
     winbackMonths: 3,
     winbackTemplate: L.DEFAULT_WINBACK_TEMPLATE,
+    birthdayTemplate: L.DEFAULT_BIRTHDAY_TEMPLATE,
   };
 
   // משלים שדות חדשים (צבע, תתי-סוגים, תכשירים) להגדרות שנשמרו בגרסה קודמת
@@ -98,6 +99,7 @@
     s.askCalendar = s.askCalendar !== false;
     s.winbackMonths = WINBACK_OPTIONS.includes(Number(s.winbackMonths)) ? Number(s.winbackMonths) : 3;
     if (typeof s.winbackTemplate !== 'string' || !s.winbackTemplate.trim()) s.winbackTemplate = L.DEFAULT_WINBACK_TEMPLATE;
+    if (typeof s.birthdayTemplate !== 'string' || !s.birthdayTemplate.trim()) s.birthdayTemplate = L.DEFAULT_BIRTHDAY_TEMPLATE;
     if (typeof s.businessName !== 'string') s.businessName = DEFAULT_SETTINGS.businessName;
     if (typeof s.template !== 'string' || !s.template.trim()) s.template = L.DEFAULT_TEMPLATE;
     return s;
@@ -557,14 +559,18 @@
     });
   }
 
+  function birthdayText(name, age) {
+    const tpl = state.settings.birthdayTemplate.replace(/\{\s*גיל\s*\}/g, age == null ? '' : String(age));
+    return L.fillTemplate(tpl, { clientName: name }, state.settings.businessName);
+  }
+
   function birthdayHTML() {
     const list = birthdayList();
     if (!list.length) return '';
     return `<section class="card bday-card">
       <h2>🎂 מחר יום הולדת</h2>
       ${list.map((b) => {
-        const first = b.name.trim().split(' ')[0];
-        const link = L.waLink(b.phone, `מזל טוב ${first}! 🎉 מאחלת לך יום הולדת שמח, בריאות ואושר 💗\n${state.settings.businessName}`);
+        const link = L.waLink(b.phone, birthdayText(b.name, b.age));
         return `<div class="wb-row">
           <button class="wb-who" data-action="open-client" data-key="${esc(b.key)}">
             <span class="avatar">${esc(initial(b.name))}</span>
@@ -1788,6 +1794,18 @@
       </section>
 
       <section class="card">
+        <h2>ברכת יום הולדת</h2>
+        <p class="settings-note">יום לפני יום ההולדת של לקוחה (לפי תאריך הלידה בהצהרת הבריאות) יופיע בלשונית "תזכורות" כפתור לשליחת ברכה בוואטסאפ.</p>
+        <div class="field" style="margin-bottom:0">
+          <label for="bdTpl">נוסח הברכה</label>
+          <textarea id="bdTpl" rows="4">${esc(st.birthdayTemplate)}</textarea>
+        </div>
+        <p class="settings-note" style="margin:6px 0">אפשר להשתמש ב-{שם}, {שם מלא}, {גיל} ו-{עסק}.</p>
+        <div class="wa-preview-wrap"><small>כך זה ייראה ללקוחה:</small><div class="wa-preview" id="bdPreview">${esc(birthdayText('דנה לוי', 30))}</div></div>
+        <button class="link-btn" data-action="reset-birthday">שחזור הנוסח המקורי</button>
+      </section>
+
+      <section class="card">
         <h2>אנשי קשר מהטלפון</h2>
         <p class="settings-note">אחרי הייבוא אנשי הקשר יופיעו במסך "לקוחות", וכשמקלידים שם בטיפול חדש הם יוצעו והטלפון יתמלא לבד.</p>
         <div class="kv"><span>אנשי קשר מיובאים</span><b>${state.contacts.length}</b></div>
@@ -2853,6 +2871,13 @@
         state.settings.businessName = e.target.value;
         $('#tplPreview').textContent = templatePreview();
         $('#wbPreview').textContent = winbackPreview();
+        $('#bdPreview').textContent = birthdayText('דנה לוי', 30);
+        clearTimeout(tplTimer);
+        tplTimer = setTimeout(saveSettings, 400);
+      });
+      $('#bdTpl').addEventListener('input', (e) => {
+        state.settings.birthdayTemplate = e.target.value;
+        $('#bdPreview').textContent = birthdayText('דנה לוי', 30);
         clearTimeout(tplTimer);
         tplTimer = setTimeout(saveSettings, 400);
       });
@@ -3082,6 +3107,13 @@
     'wb-more': () => { state.winbackAll = true; render(); },
     'wb-less': () => { state.winbackAll = false; render(); },
     'wb-scroll': () => { const el = $('#winback'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+    'reset-birthday': async () => {
+      const ok = await ask({ title: 'לשחזר את הנוסח המקורי?', text: 'הנוסח הנוכחי יימחק.', ok: 'שחזור' });
+      if (!ok) return;
+      state.settings.birthdayTemplate = L.DEFAULT_BIRTHDAY_TEMPLATE;
+      await saveSettings();
+      render();
+    },
     'reset-winback': async () => {
       const ok = await ask({ title: 'לשחזר את הנוסח המקורי?', text: 'הנוסח הנוכחי יימחק.', ok: 'שחזור' });
       if (!ok) return;

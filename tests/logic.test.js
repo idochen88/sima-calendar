@@ -461,3 +461,21 @@ test('נוסח ההודעה ללקוחות שלא חזרו: בלי "חשבתי �
   const msg = L.fillTemplate(L.DEFAULT_WINBACK_TEMPLATE, { clientName: 'דנה כהן', items: [] }, 'סימה');
   assert.ok(msg.startsWith('היי דנה') && msg.endsWith('סימה'));
 });
+
+test('birthdaysOn: יום הולדת מתוך ההצהרות, הצהרה אחרונה לכל לקוחה, 29/2', () => {
+  const decl = (clientKey, birth, createdAt, name = clientKey) => ({ clientKey, createdAt, details: { name, birth, phone: '050' } });
+  const decls = [
+    decl('דנה', '1990-10-13', 1),
+    decl('דנה', '1990-10-13', 2),
+    decl('רות', '2000-02-29', 1),
+    decl('מיכל', '1985-05-01', 1),
+    decl('נועה', '', 1),
+  ];
+  const r = L.birthdaysOn(decls, '2026-10-13');
+  assert.equal(r.length, 1);
+  assert.equal(r[0].key, 'דנה');
+  assert.equal(r[0].age, 36);
+  assert.equal(L.birthdaysOn(decls, '2027-02-28')[0].key, 'רות');
+  assert.equal(L.birthdaysOn(decls, '2028-02-28').length, 0);
+  assert.equal(L.birthdaysOn(decls, '2028-02-29')[0].key, 'רות');
+});

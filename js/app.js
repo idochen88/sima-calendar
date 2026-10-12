@@ -549,6 +549,35 @@
       ${I.left}</button>`;
   }
 
+  /* ---------- ימי הולדת (מחר) ---------- */
+  function birthdayList() {
+    return L.birthdaysOn(state.decls, tomorrow()).map((b) => {
+      const p = findPerson(b.key);
+      return { ...b, name: (p && p.name) || b.name, phone: (p && p.phone) || b.phone };
+    });
+  }
+
+  function birthdayHTML() {
+    const list = birthdayList();
+    if (!list.length) return '';
+    return `<section class="card bday-card">
+      <h2>🎂 מחר יום הולדת</h2>
+      ${list.map((b) => {
+        const first = b.name.trim().split(' ')[0];
+        const link = L.waLink(b.phone, `מזל טוב ${first}! 🎉 מאחלת לך יום הולדת שמח, בריאות ואושר 💗\n${state.settings.businessName}`);
+        return `<div class="wb-row">
+          <button class="wb-who" data-action="open-client" data-key="${esc(b.key)}">
+            <span class="avatar">${esc(initial(b.name))}</span>
+            <span class="cr-main"><b>${esc(b.name)}</b><span>מחר בת ${b.age}</span></span>
+          </button>
+          <div class="wb-actions">${link
+            ? `<a class="btn wa small" href="${esc(link)}" target="_blank" rel="noopener">${I.wa}ברכה בוואטסאפ</a>`
+            : '<span class="muted wb-nophone">אין מספר טלפון</span>'}</div>
+        </div>`;
+      }).join('')}
+    </section>`;
+  }
+
   function viewReminders() {
     const d = state.remDay || tomorrow();
     const r = L.reminderStatus(state.appts, d);
@@ -556,6 +585,7 @@
     const label = d === tomorrow() ? `מחר · יום ${L.dayName(d)}` : `${dayLabel(d)}${dayLabel(d).startsWith('יום') ? '' : ` · יום ${L.dayName(d)}`}`;
     return `
       <div class="vhead"><div class="vhead-title"><h1>תזכורות</h1><p class="sub">שליחת תזכורות ואישורי הגעה</p></div></div>
+      ${birthdayHTML()}
       ${winbackAlert()}
       ${periodNav(label, L.longDate(d), 'rem-prev', 'rem-next', d === tomorrow() ? '' : 'rem-tomorrow', 'חזרה למחר')}
       ${r.total ? `
@@ -1900,6 +1930,7 @@
           <input id="fName" type="text" value="${esc(f.clientName)}" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="הקלידי שם…">
           <div id="suggest" class="suggest" hidden></div>
           ${canPickContact() ? `<button type="button" class="link-btn" data-action="pick-contact">${'בחירה מאנשי הקשר'}</button>` : ''}
+          <div id="repeatBox"></div>
         </div>
         <div class="field">
           <label for="fPhone">טלפון</label>
@@ -2165,6 +2196,56 @@
       .slice(0, 8);
   }
 
+  // כפתור "כמו בפעם הקודמת" לטיפול חדש של לקוחה קיימת
+  function renderRepeat() {
+    const box = $('#repeatBox');
+    if (!box || !form) return;
+    const prev = !form.id && L.lastApptOf(state.appts, form.clientName);
+    box.innerHTML = prev ? `<button type="button" class="repeat-btn" data-action="f-repeat">
+      <span>כמו בפעם הקודמת <small>(${esc(L.shortDate(prev.date))})</small></span>
+      <b>${esc(L.treatmentNames(prev) || L.productNames(prev))}</b></button>` : '';
+  }
+
+  // מחיר עדכני מהמחירון; אם הטיפול/תכשיר כבר לא קיים, נשאר המחיר הקודם
+  function currentPrice(it, men) {
+    if (L.isProduct(it)) {
+      const pr = state.settings.products.find((x) => x.id === it.productId);
+      return pr ? pr.price : it.price;
+    }
+    const t = typeById(it.typeId);
+    if (!t) return it.price;
+    const sb = it.subId ? t.subs.find((x) => x.id === it.subId) : null;
+    if (it.subId && !sb) return it.price;
+    const p = priceFor(sb || t, men);
+    return p == null ? it.price : p;
+  }
+
+  function repeatPrev() {
+    if (!form) return;
+    const prev = L.lastApptOf(state.appts, form.clientName);
+    if (!prev) return;
+    const c = JSON.parse(JSON.stringify(prev));
+    form.men = !!c.men;
+    form.items = (c.items || []).map((it) => ({ ...it, price: currentPrice(it, form.men) }));
+    form.duration = L.apptDuration(c);
+    form.durationTouched = true;
+    form.discount = L.cleanDiscount(c.discount);
+    form.payments = L.cleanPayments(c.payments);
+    form.split = form.payments.length > 0;
+    form.payment = c.payment || '';
+    form.notes = c.notes || '';
+    if (!form.phone && c.phone) { form.phone = c.phone; $('#fPhone').value = c.phone; }
+    $('#fDur').value = form.duration || '';
+    $('#fNotes').value = form.notes;
+    $('#fSplit').checked = form.split;
+    $('#fNameLabel').textContent = form.men ? 'שם הלקוח' : 'שם הלקוחה';
+    $$('#fGender button').forEach((b) => { const on = !!b.dataset.men === form.men; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on); });
+    renderFormItems();
+    renderPayment();
+    $('#repeatBox').innerHTML = '';
+    toast('הפרטים הועתקו מהטיפול הקודם');
+  }
+
   function fillPhoneFromClient(name) {
     const c = knownPeople().find((x) => x.key === L.normName(name) && x.phone);
     if (c && c.phone && !$('#fPhone').value.trim()) {
@@ -2210,11 +2291,13 @@
       form.clientName = c.name;
       if (c.phone) { $('#fPhone').value = c.phone; form.phone = c.phone; }
       sug.hidden = true;
+      renderRepeat();
       $('#fPhone').focus();
     });
     name.addEventListener('blur', () => {
       setTimeout(() => { sug.hidden = true; }, 150);
       fillPhoneFromClient(name.value);
+      renderRepeat();
     });
     $('#fPhone').addEventListener('input', (e) => { form.phone = e.target.value; e.target.classList.remove('invalid'); });
     $('#fDate').addEventListener('change', (e) => { form.date = e.target.value; updateFormTotals(); });
@@ -2656,6 +2739,7 @@
       const phone = (c.tel && c.tel[0]) || '';
       if (name) { $('#fName').value = name; form.clientName = name; }
       if (phone) { $('#fPhone').value = phone; form.phone = phone; }
+      renderRepeat();
     } catch (e) { /* המשתמשת ביטלה */ }
   }
 
@@ -2885,6 +2969,7 @@
       const sb = el.dataset.sub ? t.subs.find((x) => x.id === el.dataset.sub) : null;
       toggleItem((i) => !L.isProduct(i) && i.typeId === t.id && (i.subId || null) === (sb ? sb.id : null), () => treatmentItem(t, sb));
     },
+    'f-repeat': () => repeatPrev(),
     'f-gender': (el) => {
       const men = !!el.dataset.men;
       if (form.men === men) return;

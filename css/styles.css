@@ -1007,3 +1007,13 @@ ol.legal li { margin-bottom: 6px; }
 .wb-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .wb-actions .btn.small { flex: 1; }
 .wb-nophone { flex: 1; font-size: 14px; }
+
+/* כמו בפעם הקודמת */
+.repeat-btn {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  margin-top: 8px; padding: 10px 14px; border-radius: 14px; text-align: start;
+  background: var(--beige); border: 1.5px dashed var(--rose); color: var(--text, inherit);
+}
+.repeat-btn span { color: var(--rose); font-weight: 600; font-size: 14px; }
+.repeat-btn small { color: var(--muted, #888); font-weight: 400; }
+.repeat-btn b { font-size: 15px; }

@@ -511,6 +511,15 @@
     return [...map.values()];
   }
 
+  // התור האחרון של הלקוחה שלא בוטל ויש בו משהו (לשכפול "כמו בפעם הקודמת")
+  function lastApptOf(appts, name, excludeId) {
+    const key = normName(name);
+    if (!key) return null;
+    return appts
+      .filter((a) => a.id !== excludeId && normName(a.clientName) === key && isCounted(a) && (a.items || []).length)
+      .sort((a, b) => (b.date + (b.time || '')).localeCompare(a.date + (a.time || '')))[0] || null;
+  }
+
   // לקוחות שהגיעו פעם, לא קבועה להן שום תור קדימה, והביקור האחרון שלהן היה לפני `months` חודשים או יותר.
   // הקרובות לסף ראשונות. last: התור האחרון (לשימוש בהודעה).
   function overdueClients(appts, today, months) {
@@ -710,18 +719,38 @@
     return { state: days > DECL_VALID_DAYS ? 'expired' : 'valid', last, days, count: mine.length };
   }
 
+  // לקוחות שיום ההולדת שלהן (מתוך ההצהרות) חל בתאריך date. 29/2 נחגג ב-28/2 בשנה לא מעוברת.
+  function birthdaysOn(decls, date) {
+    const [y, m, d] = date.split('-').map(Number);
+    const leap = (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+    const latest = new Map();
+    for (const x of decls) {
+      const b = x.details && x.details.birth;
+      if (!x.clientKey || !/^\d{4}-\d{2}-\d{2}$/.test(b || '')) continue;
+      const cur = latest.get(x.clientKey);
+      if (!cur || (x.createdAt || 0) > (cur.createdAt || 0)) latest.set(x.clientKey, x);
+    }
+    const out = [];
+    for (const x of latest.values()) {
+      const [by, bm, bd] = x.details.birth.split('-').map(Number);
+      const hit = (bm === m && bd === d) || (!leap && bm === 2 && bd === 29 && m === 2 && d === 28);
+      if (hit) out.push({ key: x.clientKey, name: x.details.name || '', phone: x.details.phone || '', birth: x.details.birth, age: y - by });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name, 'he'));
+  }
+
   const api = {
     PAYMENTS, LEGACY_PAYMENTS, ALL_PAYMENTS, NO_PAYMENT, NO_PAYMENT_LABEL, STATUSES, DAY_NAMES, DAY_LETTERS, MONTH_NAMES,
     DEFAULT_DURATION, DEFAULT_TEMPLATE, DEFAULT_WINBACK_TEMPLATE,
     parseDate, fmtDate, todayStr, addDays, dayOfWeek, daysInMonth, monthStart, monthEnd, addMonths,
     weekStart, weekRange, monthRange, monthWeeks, shortDate, longDate, monthLabel, dayName,
     timeToMin, minToTime, apptDuration, apptEnd,
-    num, round2, formatMoney, apptTotal, apptSubtotal, apptDiscount, cleanDiscount, isCounted, paymentLabel, cleanPayments, paymentParts, paymentText, statusLabel, treatmentNames,
+    num, round2, formatMoney, apptTotal, apptSubtotal, apptDiscount, cleanDiscount, isCounted, lastApptOf, paymentLabel, cleanPayments, paymentParts, paymentText, statusLabel, treatmentNames,
     isProduct, itemQty, itemTotal, itemLabel, productNames, buildICS,
     summarize, daySummary, weekSummary, monthSummary, dailyTotals,
     findOverlaps, toIntlPhone, fillTemplate, waLink, reminderStatus,
     normName, clientsIndex, searchClients, parseVCards, priceList, isHairType,
-    plusMonths, overdueClients,
+    plusMonths, overdueClients, birthdaysOn,
     DECL_VALID_DAYS, phoneKey, matchByPhone, daysBetween, declStatus,
   };
 
